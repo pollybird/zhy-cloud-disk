@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# 运行期数据
+backend/instance/*
+!backend/instance/.gitkeep
+backend/storage/*
+!backend/storage/.gitkeep
+
+# 环境变量
+.env
+*.log
+
+# Node / 前端
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+.trae/
