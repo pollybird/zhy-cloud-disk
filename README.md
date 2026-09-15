@@ -1,6 +1,6 @@
 # 钟毓私有云盘（zhyCloudDisk）
 
-基于 Flask + Vue3 的轻量私有云盘系统，支持文件管理、分享、插件扩展。
+基于 Flask + Vue3 + Electron 的轻量私有云盘系统，服务端支持文件管理、分享、插件扩展，并提供桌面同步盘客户端，本地文件夹与云端实时双向同步。
 
 > Copyright (c) 2026 泰州姜堰钟毓信息技术有限公司. 本项目基于 [Apache License 2.0](./LICENSE) 开源。
 
@@ -13,6 +13,7 @@
 
 - **后端**：Flask 3.0 + SQLAlchemy + Flask-JWT-Extended + APScheduler + Redis（可选）
 - **前端**：Vue 3 + Element Plus + Vite + Pinia
+- **桌面客户端**：Electron 33 + electron-vite + Vue 3 + better-sqlite3 + chokidar
 - **数据库**：SQLite（开发）/ MySQL / PostgreSQL（生产）
 - **部署**：Docker Compose（gunicorn + nginx）
 
@@ -114,6 +115,81 @@ npm run build  # 生产构建，输出到 dist/
 
 生产环境用 nginx 托管 `dist/` 并将 `/api/` 反向代理到后端 5000 端口。
 
+## 桌面同步客户端（client/）
+
+跨平台桌面客户端（Windows / macOS / Linux），将本地指定文件夹与云盘实时双向同步。
+
+### 功能特性
+
+- **首次运行向导**：服务器地址（含连通性测试）→ 账号密码 → 本地同步路径 → 开机自启，四步完成配置
+- **首次全量同步**：自动将云端全部文件（含多级目录）下载到本地同步文件夹
+- **实时双向同步**：
+  - 本地增 / 删 / 改 / 重命名 / 移动 → 自动上传到服务器（chokidar 监听，重命名与移动智能配对，不误判成删除+重传）
+  - 服务器端变更 → 定时轮询（默认 60s）拉取并同步到本地
+- **秒传去重**：上传前基于 MD5 预检，内容一致自动跳过；同名不同内容按策略处理冲突
+- **主界面同步历史**：全部记录 / 已同步 / 失败 三个标签页，实时显示每个文件的下载、上传、删除、改名、移动记录及失败原因
+- **常驻托盘**：关闭主界面驻留系统托盘继续同步，右键托盘菜单可打开主界面、打开同步文件夹、立即同步、设置开机自启、退出
+- **安全存储**：JWT 通过系统密钥环加密保存（safeStorage / Keychain / DPAPI），401 自动刷新 token
+- **冲突策略**：保留两者（自动生成"服务器冲突"副本）或最后修改者胜出
+
+### 安装依赖（国内镜像）
+
+客户端已内置 `.npmrc`，自动使用 npmmirror 镜像（含 Electron 与 better-sqlite3 二进制镜像）：
+
+```bash
+cd client
+npm install
+```
+
+> better-sqlite3 为原生模块，npm 会按 Electron ABI 自动编译；若提示 ABI 不匹配，执行 `npx electron-rebuild -f -w better-sqlite3`。
+
+### 开发运行
+
+```bash
+npm run dev          # electron-vite 开发模式
+# 或构建后直接运行：
+npx electron-vite build
+./node_modules/.bin/electron .
+```
+
+> **Linux 无 root 环境提示**：若无法为 `chrome-sandbox` 设置 SUID 权限，开发时追加参数 `--no-sandbox --disable-gpu-sandbox`。正式安装包（deb/AppImage）会自动配置沙箱，无需此参数。
+
+### 单元测试
+
+```bash
+npm test             # 56 个用例（vitest）
+npm run test:watch   # 监听模式
+```
+
+覆盖任务队列（串行/去重/退避重试）、远端 diff 协调器、路径映射、MD5 计算、HTTP 拦截器（401 自动刷新）、设置持久化、token 加密存储等核心逻辑。
+
+### 打包发布
+
+```bash
+npm run package:linux   # Linux AppImage
+npm run package:win     # Windows NSIS 安装包
+npm run package:mac     # macOS DMG
+```
+
+产物输出到 `client/dist/`。
+
+### 客户端目录结构
+
+```
+client/
+├── src/
+│   ├── main/            # 主进程：窗口、托盘、开机自启、IPC
+│   ├── preload/         # 安全桥（contextBridge 暴露受限 API）
+│   ├── renderer/        # Vue3 界面：配置向导、同步历史主界面、设置
+│   └── lib/
+│       ├── api/         # axios 封装（token 注入 / 401 刷新 / 文件接口）
+│       ├── mirror/      # better-sqlite3 镜像库（远端树快照 / 本地指纹 / 同步日志）
+│       ├── store/       # 设置持久化 + 加密 token
+│       └── sync/        # 同步引擎：watcher / poller / 队列 / 协调器 / 哈希
+├── tests/               # vitest 单元测试（56 用例）
+└── resources/           # 应用图标
+```
+
 ## 环境变量参考
 
 | 变量 | 默认值 | 说明 |
@@ -139,6 +215,9 @@ cd backend && .venv/bin/python -m pytest tests/ -v
 
 # 前端构建
 cd frontend && npm run build
+
+# 客户端单元测试
+cd client && npm test
 ```
 
 ## 架构概览
@@ -164,6 +243,13 @@ zhyCloudDisk/
 │   │   └── stores/        # Pinia 状态管理
 │   ├── Dockerfile
 │   └── nginx.conf
+├── client/                # Electron 桌面同步客户端
+│   ├── src/
+│   │   ├── main/          # 主进程（窗口 / 托盘 / 开机自启 / IPC）
+│   │   ├── preload/       # contextBridge 安全桥
+│   │   ├── renderer/      # Vue3 界面（向导 / 同步历史 / 设置）
+│   │   └── lib/           # API 封装 / 镜像库 / 同步引擎
+│   └── tests/             # vitest 单元测试（56 用例）
 ├── plugins/               # 外部插件目录
 ├── docker-compose.yml
 └── README.md

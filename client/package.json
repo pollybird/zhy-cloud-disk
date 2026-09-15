@@ -1,0 +1,40 @@
+{
+  "name": "zhyclouddisk-client",
+  "version": "1.0.0",
+  "private": true,
+  "description": "钟毓私有云盘同步客户端",
+  "author": "泰州姜堰钟毓信息技术有限公司",
+  "license": "Apache-2.0",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "electron-vite build && electron-builder",
+    "package:win": "electron-vite build && electron-builder --win nsis",
+    "package:linux": "electron-vite build && electron-builder --linux AppImage",
+    "package:mac": "electron-vite build && electron-builder --mac dmg"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "auto-launch": "^5.0.6",
+    "axios": "^1.7.7",
+    "better-sqlite3": "^11.3.0",
+    "chokidar": "^3.6.0",
+    "electron-log": "^5.2.0",
+    "electron-store": "^8.2.0",
+    "element-plus": "^2.8.8",
+    "pinia": "^2.2.6",
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "vite": "^5.4.11",
+    "vitest": "^4.1.11"
+  }
+}

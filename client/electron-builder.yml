@@ -1,0 +1,21 @@
+appId: cn.tzzhy.clouddisk
+productName: 钟毓云盘
+directories:
+  output: build
+files:
+  - out/**/*
+  - resources/**/*
+win:
+  target: nsis
+  icon: resources/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target: dmg
+  icon: resources/icon.png
+  category: public.app-category.productivity
+linux:
+  target: AppImage
+  icon: resources/icon.png
+  category: Network
