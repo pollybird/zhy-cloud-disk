@@ -9,6 +9,7 @@ import { isConfigured, getSettings } from '../lib/store/settings.js'
 import { getAccessToken, getRefreshToken } from '../lib/store/keystore.js'
 import { setCredentials, setOnAuthExpired } from '../lib/api/client.js'
 import { start, stop } from '../lib/sync/engine.js'
+import { getDeptTempManager } from './dept-ipc.js'
 import { emit, EVENTS } from '../lib/events.js'
 import { info, error } from '../lib/logger.js'
 
@@ -31,12 +32,19 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     registerIpc()
 
+    // 清理上次超期的部门网盘临时文件（best-effort，不阻塞启动）
+    getDeptTempManager()
+      .cleanExpired()
+      .catch(() => {})
+
     const configured = isConfigured()
 
     if (!configured) {
-      // 首次运行：打开向导
+      // 首次运行：打开向导并显式显示（Linux 下需主动 show/focus，否则窗口可能不可见）
       info('First run: showing setup wizard')
-      createWindow()
+      const win = createWindow()
+      win.show()
+      win.focus()
     } else {
       // 已配置：恢复 token，启动引擎
       const settings = getSettings()
@@ -58,8 +66,10 @@ if (!gotLock) {
         error(`Sync engine failed to start: ${e.message}`)
       }
 
-      // 启动后隐藏到托盘
-      createWindow()
+      // 启动后显示主窗口
+      const win = createWindow()
+      win.show()
+      win.focus()
     }
   })
 
@@ -74,9 +84,18 @@ if (!gotLock) {
     showWindow()
   })
 
-  // 退出前清理
-  app.on('before-quit', () => {
+  // 退出前清理：停同步引擎 + 清空部门网盘临时缓存
+  let quitting = false
+  app.on('before-quit', (e) => {
     app.isQuitting = true
     stop()
+    if (!quitting) {
+      quitting = true
+      e.preventDefault()
+      getDeptTempManager()
+        .cleanupAll()
+        .catch(() => {})
+        .finally(() => app.exit(0))
+    }
   })
 }

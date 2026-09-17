@@ -12,6 +12,7 @@
         <el-step title="欢迎" />
         <el-step title="环境检测" />
         <el-step title="数据库" />
+        <el-step title="功能选项" />
         <el-step title="管理员" />
         <el-step title="完成" />
       </el-steps>
@@ -89,7 +90,7 @@
       </div>
 
       <!-- 步骤二：数据库配置 -->
-      <div v-show="active === 1" class="step-pane">
+      <div v-show="active === 2" class="step-pane">
         <el-form :model="dbForm" label-width="110px">
           <el-form-item label="数据库类型">
             <el-radio-group v-model="dbForm.db_type" @change="onDbTypeChange">
@@ -178,8 +179,29 @@
         </div>
       </div>
 
-      <!-- 步骤三：超级管理员 -->
+      <!-- 步骤三：功能选项 -->
       <div v-show="active === 3" class="step-pane">
+        <el-form label-width="110px">
+          <el-form-item label="功能模块">
+            <el-checkbox v-model="enableDepartment" class="feature-checkbox">
+              开启部门共享网盘
+            </el-checkbox>
+            <div class="form-tip feature-tip">
+              启用多级部门组织架构、分级管理员委派与成员权限管控（只读 / 读写 / 禁止访问）。
+              <br />
+              不勾选则仅保留个人独立网盘功能；安装后可在系统设置中更改。
+            </div>
+          </el-form-item>
+        </el-form>
+
+        <div class="step-actions">
+          <el-button @click="active = 2">上一步</el-button>
+          <el-button type="primary" @click="active = 4">下一步</el-button>
+        </div>
+      </div>
+
+      <!-- 步骤四：超级管理员 -->
+      <div v-show="active === 4" class="step-pane">
         <el-form
           ref="adminFormRef"
           :model="adminForm"
@@ -217,15 +239,15 @@
         </el-form>
 
         <div class="step-actions">
-          <el-button @click="active = 2">上一步</el-button>
+          <el-button @click="active = 3">上一步</el-button>
           <el-button type="primary" @click="handleSubmit">
             <el-icon><Check /></el-icon>&nbsp;开始安装
           </el-button>
         </div>
       </div>
 
-      <!-- 步骤四：执行结果 -->
-      <div v-show="active === 4" class="step-pane result-pane">
+      <!-- 步骤五：执行结果 -->
+      <div v-show="active === 5" class="step-pane result-pane">
         <el-result
           :icon="installing ? 'info' : 'success'"
           :title="installing ? '正在安装…' : '安装完成'"
@@ -276,6 +298,7 @@ const dbForm = reactive({
 })
 
 const adminFormRef = ref()
+const enableDepartment = ref(false)
 const adminForm = reactive({
   storage_dir: '',
   admin_username: '',
@@ -393,7 +416,7 @@ async function handleSubmit() {
       active.value = 2
       return
     }
-    active.value = 4
+    active.value = 5
     installing.value = true
     installProgress.value = 45
     try {
@@ -402,6 +425,7 @@ async function handleSubmit() {
         admin_username: adminForm.admin_username.trim(),
         admin_email: adminForm.admin_email.trim(),
         admin_password: adminForm.admin_password,
+        department_drive_enabled: enableDepartment.value,
       }
       if (adminForm.storage_dir.trim()) {
         payload.storage_dir = adminForm.storage_dir.trim()
@@ -413,7 +437,7 @@ async function handleSubmit() {
       installProgress.value = 100
       installResult.value = res.data
     } catch (e) {
-      active.value = 3
+      active.value = 4
     } finally {
       installing.value = false
     }
@@ -449,6 +473,14 @@ function enterSetup() {
   font-size: 12px;
   color: #909399;
   line-height: 1.6;
+}
+
+.feature-checkbox {
+  height: auto;
+}
+
+.feature-tip {
+  margin-top: 6px;
 }
 
 .setup-wrapper {

@@ -25,6 +25,24 @@
           <el-icon><User /></el-icon>
           <span>个人中心</span>
         </el-menu-item>
+        <el-menu-item v-if="appStore.departmentDrive === true" index="/department-files">
+          <el-icon><Files /></el-icon>
+          <span>部门网盘</span>
+        </el-menu-item>
+        <template v-if="showDepartmentMenu">
+          <el-menu-item index="/departments">
+            <el-icon><OfficeBuilding /></el-icon>
+            <span>部门管理</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/permissions">
+            <el-icon><Lock /></el-icon>
+            <span>权限管理</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/logs">
+            <el-icon><Document /></el-icon>
+            <span>操作日志</span>
+          </el-menu-item>
+        </template>
         <el-menu-item v-if="userStore.isAdmin" index="/admin/users">
           <el-icon><Setting /></el-icon>
           <span>用户管理</span>
@@ -67,12 +85,30 @@
 </template>
 
 <script setup>
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { useAppStore } from '../stores/app'
 import { useUserStore } from '../stores/user'
 
 const router = useRouter()
 const userStore = useUserStore()
+const appStore = useAppStore()
+
+// 部门共享功能开启且当前用户具备管理入口（超管或部门管理员）时展示菜单
+const showDepartmentMenu = computed(
+  () => appStore.departmentDrive === true && userStore.canManageDrive,
+)
+
+onMounted(async () => {
+  if (!userStore.isLogin) return
+  if (appStore.departmentDrive === null) {
+    await appStore.fetchFeatureFlags()
+  }
+  if (appStore.departmentDrive && !userStore.adminDeptsLoaded) {
+    await userStore.fetchAdminDepts()
+  }
+})
 
 async function onCommand(command) {
   if (command === 'profile') {

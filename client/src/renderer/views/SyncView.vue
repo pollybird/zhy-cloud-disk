@@ -11,6 +11,15 @@
             <el-button size="small" @click="openFolder">
               <el-icon><FolderOpened /></el-icon>&nbsp;打开文件夹
             </el-button>
+            <el-button
+              v-if="deptEnabled"
+              size="small"
+              type="success"
+              plain
+              @click="router.push('/department')"
+            >
+              <el-icon><OfficeBuilding /></el-icon>&nbsp;部门网盘
+            </el-button>
             <el-button size="small" type="primary" plain @click="syncNow" :disabled="state === 'first-sync'">
               <el-icon><Refresh /></el-icon>&nbsp;立即同步
             </el-button>
@@ -81,6 +90,7 @@ const logs = ref([])
 const loading = ref(false)
 const countSynced = ref(0)
 const countFailed = ref(0)
+const deptEnabled = ref(false)
 
 const stateText = {
   idle: '已同步',
@@ -175,6 +185,13 @@ const unsubs = []
 onMounted(async () => {
   await refreshState()
   await loadLogs()
+  // 部门网盘功能开关（服务器未开启或旧版客户端无此接口时不显示入口）
+  try {
+    const res = await window.zhy.dept?.featureFlags()
+    deptEnabled.value = Boolean(res?.success && res.data?.department_drive)
+  } catch {
+    deptEnabled.value = false
+  }
   unsubs.push(
     window.zhy.on('sync:state', (s) => {
       state.value = s

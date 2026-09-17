@@ -12,6 +12,8 @@ export const EVENTS = {
   CONFLICT: 'conflict',                // { localPath, serverNode }
   AUTH_EXPIRED: 'auth-expired',
   LOG: 'log',                          // { level, message }
+  DEPT_PROGRESS: 'dept-progress',      // 部门网盘传输进度 { phase, current, total, fileName, percent }
+  DEPT_TOAST: 'dept-toast',            // 部门网盘提示 { type, message }
 }
 
 export function emit(event, data) {

@@ -1,37 +1,77 @@
 /**
  * preload：通过 contextBridge 安全暴露 API 给渲染层。
  */
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+
+/**
+ * IPC 边界净化：剥离 Vue reactive Proxy，转为可结构化克隆的纯对象。
+ * 渲染层传入的表格行/列表常为响应式代理，直接 invoke 会抛
+ * "An object could not be cloned."。此处入参均为文件节点等纯 DTO，
+ * JSON 往返可安全覆盖。
+ */
+function plain(value) {
+  if (value === null || typeof value !== 'object') return value
+  return JSON.parse(JSON.stringify(value))
+}
+
+function invoke(channel, ...args) {
+  return ipcRenderer.invoke(channel, ...args.map(plain))
+}
 
 const api = {
   // 设置
-  getSettings: () => ipcRenderer.invoke('settings:get'),
-  setSettings: (updates) => ipcRenderer.invoke('settings:set', updates),
+  getSettings: () => invoke('settings:get'),
+  setSettings: (updates) => invoke('settings:set', updates),
 
   // 目录选择
-  chooseFolder: () => ipcRenderer.invoke('dialog:chooseFolder'),
+  chooseFolder: () => invoke('dialog:chooseFolder'),
 
   // 认证
   login: (serverUrl, username, password) =>
-    ipcRenderer.invoke('auth:login', { serverUrl, username, password }),
-  testConnection: (serverUrl) => ipcRenderer.invoke('auth:testConnection', serverUrl),
-  logout: () => ipcRenderer.invoke('auth:logout'),
+    invoke('auth:login', { serverUrl, username, password }),
+  testConnection: (serverUrl) => invoke('auth:testConnection', serverUrl),
+  logout: () => invoke('auth:logout'),
 
   // 同步控制
-  startSync: () => ipcRenderer.invoke('sync:start'),
-  pauseSync: () => ipcRenderer.invoke('sync:pause'),
-  resumeSync: () => ipcRenderer.invoke('sync:resume'),
-  getSyncStatus: () => ipcRenderer.invoke('sync:status'),
-  syncNow: () => ipcRenderer.invoke('sync:sync-now'),
-  openSyncFolder: () => ipcRenderer.invoke('sync:open-folder'),
+  startSync: () => invoke('sync:start'),
+  pauseSync: () => invoke('sync:pause'),
+  resumeSync: () => invoke('sync:resume'),
+  getSyncStatus: () => invoke('sync:status'),
+  syncNow: () => invoke('sync:sync-now'),
+  openSyncFolder: () => invoke('sync:open-folder'),
 
   // 同步历史
-  getSyncLogs: (params) => ipcRenderer.invoke('sync:get-logs', params),
-  clearSyncLogs: () => ipcRenderer.invoke('sync:clear-logs'),
+  getSyncLogs: (params) => invoke('sync:get-logs', params),
+  clearSyncLogs: () => invoke('sync:clear-logs'),
 
   // 开机自启
-  getAutoStart: () => ipcRenderer.invoke('autostart:get'),
-  setAutoStart: (enabled) => ipcRenderer.invoke('autostart:set', enabled),
+  getAutoStart: () => invoke('autostart:get'),
+  setAutoStart: (enabled) => invoke('autostart:set', enabled),
+
+  // 部门网盘（在线浏览，不同步到本地）
+  dept: {
+    featureFlags: () => invoke('dept:feature-flags'),
+    tree: () => invoke('dept:tree'),
+    list: (params) => invoke('dept:list', params),
+    folders: (params) => invoke('dept:folders', params),
+    createFolder: (params) => invoke('dept:create-folder', params),
+    rename: (id, fileName) => invoke('dept:rename', { id, fileName }),
+    move: (id, targetParentId) => invoke('dept:move', { id, targetParentId }),
+    remove: (id) => invoke('dept:delete', { id }),
+    openFile: (node) => invoke('dept:open-file', node),
+    download: (nodes, targetDir) =>
+      invoke('dept:download', { nodes, targetDir }),
+    chooseFiles: () => invoke('dept:choose-files'),
+    statPaths: (paths) => invoke('dept:stat-paths', { paths }),
+    walkDir: (dir) => invoke('dept:walk-dir', { dir }),
+    planUploads: (paths, departmentId, parentId) =>
+      invoke('dept:plan-uploads', { paths, departmentId, parentId }),
+    upload: (plans, departmentId, parentId, overwrite) =>
+      invoke('dept:upload', { plans, departmentId, parentId, overwrite }),
+  },
+
+  // Electron 32+ 拖入文件真实路径必须经 webUtils 获取
+  getPathForFile: (file) => webUtils.getPathForFile(file),
 
   // 事件监听
   on: (channel, callback) => {
@@ -41,6 +81,8 @@ const api = {
       'sync:log',
       'sync:conflict',
       'sync:auth-expired',
+      'dept:progress',
+      'dept:toast',
     ]
     if (!validChannels.includes(channel)) return
     const handler = (_e, data) => callback(data)

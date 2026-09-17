@@ -22,7 +22,7 @@
     <el-table :data="items" v-loading="loading" border stripe>
       <el-table-column label="文件名" min-width="220">
         <template #default="{ row }">
-          <el-icon class="file-ico"><Document /></el-icon>
+          <FileIcon class="file-ico" :row="row" :size="20" />
           <span>{{ row.file_name || '（文件已删除）' }}</span>
         </template>
       </el-table-column>
@@ -89,6 +89,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { cancelShare, listShares, sharePageUrl } from '../../api/share'
+import FileIcon from '../../components/FileIcon.vue'
 import { formatDateTime, formatSize } from '../../utils/format'
 
 const items = ref([])

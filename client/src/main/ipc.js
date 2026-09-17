@@ -15,9 +15,13 @@ import {
 import { emit, on, EVENTS } from '../lib/events.js'
 import { setAutoStart, isAutoStartEnabled } from './autostart.js'
 import { getMainWindow } from './window.js'
+import { registerDeptIpc } from './dept-ipc.js'
 import { error } from '../lib/logger.js'
 
 export function registerIpc() {
+  // 部门网盘（在线浏览）通道
+  registerDeptIpc()
+
   // 引擎事件转发到渲染层（状态 / 进度 / 同步日志）
   on(EVENTS.STATE_CHANGE, (s) => getMainWindow()?.webContents?.send('sync:state', s))
   on(EVENTS.PROGRESS, (p) => getMainWindow()?.webContents?.send('sync:progress', p))

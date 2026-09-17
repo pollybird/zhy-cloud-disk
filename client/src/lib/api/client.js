@@ -56,8 +56,13 @@ http.interceptors.response.use(
     return body
   },
   async (error) => {
-    // 401 自动 refresh 一次；无 refreshToken 时直接触发过期回调
-    if (error.response && error.response.status === 401) {
+    const cfg = error.config || {}
+    const url = cfg.url || ''
+    // 登录/刷新请求本身返回 401 时直接抛错，避免无限刷新循环
+    const isAuthRequest = url.includes('/api/login') || url.includes('/api/auth/refresh')
+    // 401 自动 refresh 一次；无 refreshToken 或已重试过时直接触发过期回调
+    if (error.response && error.response.status === 401 && !isAuthRequest && !cfg._retried) {
+      cfg._retried = true
       if (refreshToken) {
         try {
           const res = await axios.post(`${serverUrl}/api/auth/refresh`, null, {
@@ -68,9 +73,8 @@ http.interceptors.response.use(
             accessToken = body.data.access_token
             refreshToken = body.data.refresh_token || refreshToken
             // 重试原请求
-            const original = error.config
-            original.headers.Authorization = `Bearer ${accessToken}`
-            return http(original)
+            cfg.headers.Authorization = `Bearer ${accessToken}`
+            return http(cfg)
           }
         } catch {
           // refresh 失败

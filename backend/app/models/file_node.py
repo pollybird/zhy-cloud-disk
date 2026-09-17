@@ -22,6 +22,9 @@ class FileNode(db.Model):
     user_id = db.Column(
         db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
+    department_id = db.Column(
+        db.Integer, db.ForeignKey("department.id"), nullable=True, index=True
+    )  # null=个人文件（1.0.0）；非 null=部门文件，user_id 记录上传者
     file_name = db.Column(db.String(255), nullable=False)
     file_suffix = db.Column(db.String(32), nullable=False, default="")
     file_size = db.Column(db.BigInteger, nullable=False, default=0)
@@ -44,6 +47,7 @@ class FileNode(db.Model):
         data = {
             "id": self.id,
             "user_id": self.user_id,
+            "department_id": self.department_id,
             "file_name": self.file_name,
             "file_suffix": self.file_suffix,
             "file_size": self.file_size,

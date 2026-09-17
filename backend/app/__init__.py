@@ -55,20 +55,34 @@ def create_app(config_overrides: dict | None = None) -> Flask:
 
         return success({"version": ZHY_VERSION, "installed": is_installed()})
 
-    # 注册蓝图
-    from .api import register_blueprints
-
-    register_blueprints(app)
-
-    # 已安装：导入模型并建表（幂等），启动定时任务与插件系统
+    # 已安装：导入模型并建表（幂等），启动定时任务与插件系统。
+    # 注意：功能开关必须在蓝图注册之前读取，部门蓝图按开关条件注册。
     if is_installed():
         _import_models()
         with app.app_context():
             db.create_all()
-            from .utils.migrations import ensure_file_hash_column
+            from .utils.migrations import ensure_file_hash_column, ensure_department_columns
+
             ensure_file_hash_column()
+            ensure_department_columns()
         _start_scheduler(app)
         _init_plugins(app)
+
+        # 1.1.0 功能开关：从系统设置读取是否开启部门共享网盘
+        try:
+            from .services.setting_service import get_raw
+
+            with app.app_context():
+                department_enabled = get_raw("department_drive_enabled") == "true"
+            app.config["DEPARTMENT_DRIVE_ENABLED"] = department_enabled
+        except Exception:
+            app.logger.exception("读取部门功能开关失败，默认关闭")
+            app.config["DEPARTMENT_DRIVE_ENABLED"] = False
+
+    # 注册蓝图
+    from .api import register_blueprints
+
+    register_blueprints(app)
 
     return app
 
@@ -93,8 +107,11 @@ def _register_install_guard(app: Flask) -> None:
 def _import_models() -> None:
     """导入全部模型以注册表到 SQLAlchemy 元数据。"""
     from .models import (  # noqa: F401
+        department,
         download_log,
         file_node,
+        file_permission,
+        operation_log,
         plugin,
         share,
         system_setting,

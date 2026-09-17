@@ -69,9 +69,7 @@
             :class="{ link: row.is_folder }"
             @click.stop="openRow(row)"
           >
-            <el-icon class="file-icon" :style="{ color: iconColor(row) }">
-              <component :is="iconName(row)" />
-            </el-icon>
+            <FileIcon class="file-icon" :row="row" :size="20" />
             <span>{{ row.file_name }}</span>
           </span>
         </template>
@@ -163,6 +161,7 @@ import {
 } from '../../api/file'
 import { useUserStore } from '../../stores/user'
 import { formatDateTime, formatSize } from '../../utils/format'
+import FileIcon from '../../components/FileIcon.vue'
 
 const userStore = useUserStore()
 const user = computed(() => userStore.user || {})
@@ -319,47 +318,6 @@ async function download(row) {
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
-}
-
-function iconName(row) {
-  if (row.is_folder) return 'Folder'
-  const map = {
-    image: 'Picture',
-    video: 'VideoPlay',
-    document: 'Document',
-    audio: 'Headset',
-    archive: 'Files',
-  }
-  return map[categoryOf(row.file_suffix)] || 'Document'
-}
-
-function iconColor(row) {
-  if (row.is_folder) return '#f59e0b'
-  const colors = {
-    image: '#10b981',
-    video: '#ef4444',
-    document: '#3b82f6',
-    audio: '#8b5cf6',
-    archive: '#64748b',
-  }
-  return colors[categoryOf(row.file_suffix)] || '#3b82f6'
-}
-
-function categoryOf(suffix) {
-  const s = (suffix || '').toLowerCase()
-  const table = {
-    jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image',
-    bmp: 'image', svg: 'image',
-    mp4: 'video', flv: 'video', mov: 'video', avi: 'video', mkv: 'video',
-    webm: 'video', wmv: 'video',
-    pdf: 'document', doc: 'document', docx: 'document', xls: 'document',
-    xlsx: 'document', ppt: 'document', pptx: 'document', txt: 'document',
-    md: 'document', csv: 'document', rtf: 'document',
-    mp3: 'audio', wav: 'audio', flac: 'audio', aac: 'audio', ogg: 'audio', m4a: 'audio',
-    zip: 'archive', rar: 'archive', '7z': 'archive', tar: 'archive',
-    gz: 'archive', bz2: 'archive',
-  }
-  return table[s] || 'other'
 }
 
 onMounted(loadAll)

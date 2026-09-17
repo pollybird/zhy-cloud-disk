@@ -61,9 +61,7 @@
       <!-- 文件信息 + 下载 -->
       <div v-else-if="state === 'ready'" class="pane">
         <div class="file-head">
-          <el-icon class="file-ico" :style="{ color: iconColor }">
-            <component :is="iconComp" />
-          </el-icon>
+          <FileIcon class="file-ico" :row="info.file" :size="40" />
           <div class="file-info">
             <div class="file-name">{{ info.file.file_name }}</div>
             <div class="file-meta">
@@ -97,6 +95,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getShareInfo, shareDownloadUrl, verifySharePassword } from '../../api/share'
 import PluginPreview from '../../components/PluginPreview.vue'
+import FileIcon from '../../components/FileIcon.vue'
 import { formatSize, formatDateTime } from '../../utils/format'
 
 const route = useRoute()
@@ -117,40 +116,6 @@ const ERROR_MAP = {
   4102: ['分享已过期', '该分享超过了设定的有效期'],
   4103: ['分享已取消', '分享者已取消该分享，链接不再可用'],
   4107: ['文件已删除', '分享对应的源文件已被删除'],
-}
-
-const iconComp = computed(() => {
-  const map = {
-    image: 'Picture',
-    video: 'VideoPlay',
-    document: 'Document',
-    audio: 'Headset',
-    archive: 'Files',
-  }
-  return map[categoryOf(info.value?.file.file_suffix)] || 'Document'
-})
-const iconColor = computed(() => {
-  const map = {
-    image: '#10b981',
-    video: '#ef4444',
-    document: '#3b82f6',
-    audio: '#8b5cf6',
-    archive: '#64748b',
-  }
-  return map[categoryOf(info.value?.file.file_suffix)] || '#3b82f6'
-})
-
-function categoryOf(suffix) {
-  const s = (suffix || '').toLowerCase()
-  const table = {
-    jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', bmp: 'image',
-    mp4: 'video', flv: 'video', mov: 'video', avi: 'video', mkv: 'video', webm: 'video',
-    pdf: 'document', doc: 'document', docx: 'document', xls: 'document',
-    xlsx: 'document', txt: 'document', ppt: 'document', pptx: 'document',
-    mp3: 'audio', wav: 'audio', flac: 'audio', aac: 'audio', ogg: 'audio', m4a: 'audio',
-    zip: 'archive', rar: 'archive', '7z': 'archive', tar: 'archive', gz: 'archive',
-  }
-  return table[s] || 'other'
 }
 
 async function loadInfo() {

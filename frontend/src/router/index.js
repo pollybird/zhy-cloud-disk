@@ -50,6 +50,37 @@ const router = createRouter({
           component: () => import('../views/profile/ProfileView.vue'),
         },
         {
+          path: 'department-files',
+          name: 'department-files',
+          component: () => import('../views/department/DepartmentFilesView.vue'),
+          // 部门成员均可访问（文件视图内部按 access 控制按钮显隐）
+          meta: { departmentFeature: true },
+        },
+        {
+          path: 'departments',
+          name: 'departments',
+          component: () => import('../views/department/DepartmentsView.vue'),
+          meta: { departmentFeature: true, departmentManager: true },
+        },
+        {
+          path: 'department-members',
+          name: 'department-members',
+          component: () => import('../views/department/DepartmentMembersView.vue'),
+          meta: { departmentFeature: true, departmentManager: true },
+        },
+        {
+          path: 'admin/permissions',
+          name: 'admin-permissions',
+          component: () => import('../views/department/PermissionManageView.vue'),
+          meta: { departmentFeature: true, departmentManager: true },
+        },
+        {
+          path: 'admin/logs',
+          name: 'admin-logs',
+          component: () => import('../views/department/OperationLogView.vue'),
+          meta: { departmentFeature: true, departmentManager: true },
+        },
+        {
           path: 'admin/users',
           name: 'admin-users',
           component: () => import('../views/admin/UsersView.vue'),
@@ -102,6 +133,25 @@ router.beforeEach(async (to) => {
   // 角色拦截
   if (to.meta.requiresAdmin && !userStore.isAdmin) {
     return { path: '/files', replace: true }
+  }
+
+  // 1.1.0 部门共享功能拦截
+  if (to.meta.departmentFeature) {
+    if (appStore.departmentDrive === null) {
+      await appStore.fetchFeatureFlags()
+    }
+    if (!appStore.departmentDrive) {
+      return { path: '/files', replace: true }
+    }
+    // 管理类页面仅超管或部门管理员可进入；部门网盘普通成员即可访问
+    if (to.meta.departmentManager && !userStore.canManageDrive) {
+      if (!userStore.adminDeptsLoaded) {
+        await userStore.fetchAdminDepts()
+      }
+      if (!userStore.canManageDrive) {
+        return { path: '/department-files', replace: true }
+      }
+    }
   }
 
   return true

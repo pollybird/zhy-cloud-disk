@@ -23,6 +23,7 @@ export function createWindow() {
     minWidth: 600,
     minHeight: 480,
     title: '钟毓云盘',
+    show: true,
     icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -30,18 +31,34 @@ export function createWindow() {
       nodeIntegration: false,
     },
     autoHideMenuBar: true,
+    backgroundColor: '#ffffff',
+  })
+
+  // 渲染层错误回流到主进程日志，便于排查白屏
+  const wc = mainWindow.webContents
+  wc.on('console-message', (_e, level, message) => {
+    if (level >= 2) console.error(`[renderer ${level}] ${message}`)
+  })
+  wc.on('did-fail-load', (_e, code, desc) => {
+    console.error(`[renderer] did-fail-load: ${code} ${desc}`)
+  })
+  wc.on('preload-error', (_e, path2, err) => {
+    console.error(`[renderer] preload-error ${path2}: ${err}`)
+  })
+  wc.on('render-process-gone', (_e, details) => {
+    console.error(`[renderer] render-process-gone: ${JSON.stringify(details)}`)
   })
 
   // 开发模式加载 dev server，生产模式加载打包文件
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-    mainWindow.webContents.openDevTools()
+    wc.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
   // 外链在系统浏览器打开
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  wc.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
   })

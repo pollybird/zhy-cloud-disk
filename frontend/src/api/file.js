@@ -4,11 +4,14 @@ export function listFiles(params) {
   return request({ url: '/api/file/list', method: 'get', params })
 }
 
-export function listChildFolders(parent_id) {
+export function listChildFolders(parent_id, department_id) {
+  const params = {}
+  if (parent_id) params.parent_id = parent_id
+  if (department_id) params.department_id = department_id
   return request({
     url: '/api/file/folders',
     method: 'get',
-    params: parent_id ? { parent_id } : {},
+    params,
   })
 }
 
@@ -37,11 +40,15 @@ export function checkDuplicate(payload) {
   })
 }
 
-export function createFolder(parent_id, file_name) {
+export function createFolder(parent_id, file_name, department_id) {
   return request({
     url: '/api/folder/create',
     method: 'post',
-    data: { parent_id, file_name },
+    data: {
+      parent_id,
+      file_name,
+      ...(department_id ? { department_id } : {}),
+    },
   })
 }
 

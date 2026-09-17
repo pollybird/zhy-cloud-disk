@@ -16,6 +16,9 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(128), unique=True, nullable=False, index=True)
     role = db.Column(db.String(16), nullable=False, default="user")  # admin/user
+    primary_department_id = db.Column(
+        db.Integer, db.ForeignKey("department.id"), nullable=True
+    )  # 用户主属部门；null=无部门归属（纯个人用户）
     total_storage = db.Column(db.BigInteger, nullable=False, default=5 * 1024 ** 3)
     used_storage = db.Column(db.BigInteger, nullable=False, default=0)
     create_time = db.Column(db.DateTime, nullable=False, default=utcnow)
@@ -27,6 +30,7 @@ class User(db.Model):
             "username": self.username,
             "email": self.email,
             "role": self.role,
+            "primary_department_id": self.primary_department_id,
             "total_storage": self.total_storage,
             "used_storage": self.used_storage,
             "create_time": self.create_time.isoformat() if self.create_time else None,

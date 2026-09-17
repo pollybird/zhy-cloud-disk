@@ -23,6 +23,8 @@ def upload():
     mode = request.form.get("mode") or "normal"
     overwrite_id_raw = request.form.get("overwrite_id")
     overwrite_id = int(overwrite_id_raw) if overwrite_id_raw else None
+    raw_dept = request.form.get("department_id")
+    department_id = int(raw_dept) if raw_dept else None
 
     results = {"success": [], "failed": []}
     for fs in files:
@@ -30,6 +32,7 @@ def upload():
             node = file_service.upload_file(
                 current_user(), fs, parent_id,
                 file_hash=file_hash, mode=mode, overwrite_id=overwrite_id,
+                department_id=department_id,
             )
             results["success"].append(node.to_dict())
         except ApiError as e:
@@ -46,6 +49,7 @@ def check_duplicate():
     parent_id = data.get("parent_id")
     file_name = data.get("file_name", "")
     file_hash = data.get("file_hash") or None
+    department_id = data.get("department_id")
     if not file_name:
         raise ApiError("缺少文件名", code=3202)
     result = file_service.check_duplicate(
@@ -53,6 +57,7 @@ def check_duplicate():
         int(parent_id) if parent_id else None,
         file_name,
         file_hash,
+        int(department_id) if department_id else None,
     )
     return success(result)
 
@@ -62,12 +67,16 @@ def check_duplicate():
 def file_list():
     parent_raw = request.args.get("parent_id")
     parent_id = int(parent_raw) if parent_raw else None
+    dept_raw = request.args.get("department_id")
+    department_id = int(dept_raw) if dept_raw else None
     category = request.args.get("category") or None
     keyword = request.args.get("keyword") or None
     page = max(int(request.args.get("page", 1)), 1)
     size = min(max(int(request.args.get("size", 50)), 1), 200)
     return success(
-        file_service.list_files(current_user(), parent_id, category, keyword, page, size)
+        file_service.list_files(
+            current_user(), parent_id, department_id, category, keyword, page, size
+        )
     )
 
 
@@ -76,7 +85,13 @@ def file_list():
 def child_folders():
     parent_raw = request.args.get("parent_id")
     parent_id = int(parent_raw) if parent_raw else None
-    return success({"items": file_service.list_child_folders(current_user(), parent_id)})
+    dept_raw = request.args.get("department_id")
+    department_id = int(dept_raw) if dept_raw else None
+    return success({
+        "items": file_service.list_child_folders(
+            current_user(), parent_id, department_id
+        )
+    })
 
 
 @bp.get("/file/download")
@@ -85,7 +100,7 @@ def download():
     file_id = request.args.get("id", type=int)
     if not file_id:
         raise ApiError("缺少文件 id", code=3202)
-    node = file_service.get_owned_node(current_user(), file_id)
+    node = file_service.get_owned_node(current_user(), file_id, required="read")
     if node.is_folder:
         raise ApiError("文件夹暂不支持打包下载", code=3203)
     path = file_service.storage_service.open_physical(node.save_path)
@@ -118,8 +133,11 @@ def create_folder():
     data = request.get_json(silent=True) or {}
     raw_parent = data.get("parent_id")
     parent_id = int(raw_parent) if raw_parent else None
+    raw_dept = data.get("department_id")
+    department_id = int(raw_dept) if raw_dept else None
     folder = file_service.create_folder(
-        current_user(), parent_id, data.get("file_name", "")
+        current_user(), parent_id, data.get("file_name", ""),
+        department_id=department_id,
     )
     return success(folder.to_dict(), msg="文件夹创建成功")
 

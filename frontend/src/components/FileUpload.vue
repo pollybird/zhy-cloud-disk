@@ -51,6 +51,8 @@ import { checkDuplicate, uploadFiles } from '../api/file'
 
 const props = defineProps({
   parentId: { type: [Number, null], default: null },
+  // 1.1.0 部门网盘上传：传入部门 ID；为空表示个人空间
+  departmentId: { type: [Number, null], default: null },
 })
 const emit = defineEmits(['uploaded'])
 
@@ -134,6 +136,9 @@ async function doUpload(file, task, { mode = 'normal', fileHash = null, overwrit
   if (props.parentId) {
     formData.append('parent_id', String(props.parentId))
   }
+  if (props.departmentId) {
+    formData.append('department_id', String(props.departmentId))
+  }
   if (fileHash) {
     formData.append('file_hash', fileHash)
   }
@@ -193,6 +198,7 @@ async function customUpload({ file }) {
   try {
     const res = await checkDuplicate({
       parent_id: props.parentId || null,
+      department_id: props.departmentId || null,
       file_name: file.name,
       file_hash: hash,
     })

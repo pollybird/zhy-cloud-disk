@@ -198,7 +198,7 @@ async function finish() {
       return
     }
     ElMessage.success('同步已启动')
-    router.push('/sync')
+    router.push('/')
   } catch (e) {
     ElMessage.error(`启动失败：${e.message}`)
   } finally {

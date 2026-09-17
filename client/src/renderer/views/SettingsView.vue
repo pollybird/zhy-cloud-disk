@@ -4,7 +4,7 @@
       <template #header>
         <div class="settings-header">
           <div class="header-left">
-            <el-button link @click="router.push('/sync')">
+            <el-button link @click="router.push('/')">
               <el-icon><ArrowLeft /></el-icon>&nbsp;返回
             </el-button>
             <span>钟毓云盘设置</span>

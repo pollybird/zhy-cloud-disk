@@ -4,6 +4,7 @@
 本身具备幂等兜底能力，多个执行体同时运行也不会出错。
 """
 from ..extensions import scheduler
+from . import share_cleanup
 
 _JOB_ID = "share-cleanup"
 _TRIGGER_INTERVAL_MINUTES = 10
@@ -11,8 +12,6 @@ _TRIGGER_INTERVAL_MINUTES = 10
 
 def start_scheduler(app) -> None:
     """启动调度器并注册分享清理任务（幂等，可重复调用）。"""
-    from . import share_cleanup
-
     if scheduler.get_job(_JOB_ID) is None:
         scheduler.add_job(
             func=lambda: _run_with_context(app),

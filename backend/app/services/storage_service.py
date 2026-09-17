@@ -77,11 +77,24 @@ def save_stream(file_storage, user_id: int) -> tuple[str, str, int]:
     return str(target), suffix, size
 
 
-def save_stream_hashed(file_storage, user_id: int) -> tuple[str, str, int, str]:
-    """流式落盘并增量计算 MD5，返回 (save_path, suffix, size, md5_hex)。"""
+def department_dir(dept_id: int) -> Path:
+    path = (storage_root() / "dept" / str(int(dept_id))).resolve()
+    if not _is_within(storage_root(), path):
+        raise ApiError("非法的存储路径", code=3001)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def save_stream_hashed(
+    file_storage, user_id: int, department_id: int | None = None
+) -> tuple[str, str, int, str]:
+    """流式落盘并增量计算 MD5，返回 (save_path, suffix, size, md5_hex)。
+
+    department_id 不为空时写入部门存储目录，否则写入用户目录。
+    """
     original = safe_original_name(file_storage.filename)
     suffix = extract_suffix(original)
-    target_dir = user_dir(user_id)
+    target_dir = department_dir(department_id) if department_id else user_dir(user_id)
     target = target_dir / physical_name(suffix)
     size = 0
     h = hashlib.md5()

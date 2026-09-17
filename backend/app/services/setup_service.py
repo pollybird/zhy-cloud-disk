@@ -280,6 +280,8 @@ def _do_install(app, payload: dict) -> dict:
     redis_url = (payload.get("redis_url") or "").strip()
     if not redis_url:
         redis_url = os.environ.get("ZHY_REDIS_URL", "")
+    department_drive = bool(payload.get("department_drive_enabled", False))
+
     cfg = {
         "version": ZHY_VERSION,
         "installed_at": datetime.now(timezone.utc).isoformat(),
@@ -292,6 +294,7 @@ def _do_install(app, payload: dict) -> dict:
         "max_upload_size": int(app.config["MAX_UPLOAD_SIZE"]),
         "allow_register": bool(app.config["ALLOW_REGISTER"]),
         "redis_url": redis_url,
+        "department_drive_enabled": department_drive,
     }
 
     # 5. 临时切换引擎 → 建表 → 建超管；最后才写安装标记
@@ -301,8 +304,12 @@ def _do_install(app, payload: dict) -> dict:
         _switch_engine(app, uri)
         # 确保模型已注册
         from ..models import (  # noqa: F401
+            department,
             download_log,
             file_node,
+            file_permission,
+            operation_log,
+            plugin,
             share,
             system_setting,
             user,
@@ -324,6 +331,14 @@ def _do_install(app, payload: dict) -> dict:
             db.session.add(admin)
             db.session.commit()
 
+            # 1.1.0 功能开关写入 system_setting
+            from ..models.system_setting import SystemSetting
+            db.session.add(SystemSetting(
+                key="department_drive_enabled",
+                value="true" if department_drive else "false",
+            ))
+            db.session.commit()
+
             # 6. 写安装标记（原子落盘，安装完成点）
             _write_installed_config(cfg)
             marker_written = True
@@ -332,6 +347,7 @@ def _do_install(app, payload: dict) -> dict:
             app.config["JWT_SECRET_KEY"] = cfg["jwt_secret_key"]
             app.config["STORAGE_DIR"] = str(storage_path)
             app.config["REDIS_URL"] = cfg.get("redis_url", "")
+            app.config["DEPARTMENT_DRIVE_ENABLED"] = department_drive
             # 安装后重新初始化缓存（此时 Redis URL 可能已变化）
             from .cache_service import init_cache
 
@@ -363,6 +379,15 @@ def _do_install(app, payload: dict) -> dict:
         manager.discover_and_sync(app)
     except Exception:  # noqa: BLE001
         app.logger.exception("安装后插件初始化失败")
+
+    # 1.1.0 勾选部门共享时，安装完成后即时补注册部门蓝图，无需重启进程
+    if department_drive:
+        try:
+            from ..api import register_department_blueprints
+
+            register_department_blueprints(app)
+        except Exception:  # noqa: BLE001
+            app.logger.exception("部门蓝图注册失败")
 
     return {
         "admin_username": admin_username,
@@ -409,6 +434,11 @@ def maybe_auto_install(app) -> bool:
     )
     if os.environ.get("ZHY_STORAGE_DIR"):
         payload["storage_dir"] = os.environ["ZHY_STORAGE_DIR"]
+
+    if os.environ.get("ZHY_DEPARTMENT_DRIVE"):
+        payload["department_drive_enabled"] = os.environ["ZHY_DEPARTMENT_DRIVE"].lower() in (
+            "1", "true", "yes",
+        )
 
     run_installation(app, payload)
     app.logger.info("环境变量静默安装完成，超级管理员：%s", username)

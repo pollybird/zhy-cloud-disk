@@ -28,11 +28,18 @@ services:
       ZHY_JWT_REFRESH_DAYS: ${ZHY_JWT_REFRESH_DAYS:-30}
       # ---- 默认配额（字节；默认 5GiB） ----
       ZHY_DEFAULT_QUOTA: ${ZHY_DEFAULT_QUOTA:-5368709120}
+      # ---- 部门共享网盘（true 开启；仅首次静默安装生效，之后在系统设置中切换） ----
+      ZHY_DEPARTMENT_DRIVE: ${ZHY_DEPARTMENT_DRIVE:-false}
       # ---- CORS ----
       ZHY_CORS_ORIGINS: ${ZHY_CORS_ORIGINS:-*}
     volumes:
       - backend-instance:/app/instance
       - backend-storage:/app/storage
+    # 默认仅绑定宿主机回环口（排障/直连用）；需对局域网客户端暴露时设
+    # ZHY_BACKEND_PORT=0.0.0.0:5000。常规部署无需开放：桌面客户端经 frontend
+    # 网关的 /api/ 反代访问后端，服务器地址与 Web 端相同。
+    ports:
+      - "${ZHY_BACKEND_PORT:-127.0.0.1:5000}:5000"
     depends_on:
       redis:
         condition: service_healthy

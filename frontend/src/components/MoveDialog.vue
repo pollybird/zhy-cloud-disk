@@ -34,6 +34,8 @@ import { listChildFolders, moveFile } from '../api/file'
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   node: { type: Object, default: () => ({}) },
+  // 1.1.0 部门网盘内移动时传入部门 ID；为空表示个人空间
+  departmentId: { type: [Number, null], default: null },
 })
 const emit = defineEmits(['update:modelValue', 'moved'])
 
@@ -59,11 +61,16 @@ function isUnderMovedNode(treeNode) {
 async function loadNode(node, resolve) {
   try {
     if (node.level === 0) {
-      resolve([{ id: 0, label: '根目录（/）', leaf: false, disabled: false }])
+      resolve([{
+        id: 0,
+        label: props.departmentId ? '部门根目录（/）' : '根目录（/）',
+        leaf: false,
+        disabled: false,
+      }])
       return
     }
     const parentId = node.data.id === 0 ? null : node.data.id
-    const res = await listChildFolders(parentId)
+    const res = await listChildFolders(parentId, props.departmentId || undefined)
     const inMovedSubtree = isUnderMovedNode(node)
     resolve(
       res.data.items.map((f) => ({

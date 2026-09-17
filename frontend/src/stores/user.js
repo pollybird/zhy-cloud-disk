@@ -5,16 +5,24 @@ import {
   register as registerApi,
 } from '../api/auth'
 import { getUserInfo } from '../api/user'
+import { getMyAdminDepts } from '../api/permission'
 
 export const useUserStore = defineStore('user', {
   state: () => ({
     token: localStorage.getItem('zhy_token') || '',
     refreshToken: localStorage.getItem('zhy_refresh_token') || '',
     user: null,
+    // 1.1.0 当前用户被委派的部门管理员列表 [{department_id, scope}]
+    adminDepts: [],
+    adminDeptsLoaded: false,
   }),
   getters: {
     isLogin: (state) => !!state.token,
     isAdmin: (state) => state.user?.role === 'admin',
+    // 是否具有部门管理入口（超管或任一部门管理员）
+    canManageDrive(state) {
+      return state.user?.role === 'admin' || state.adminDepts.length > 0
+    },
   },
   actions: {
     setTokens(access_token, refresh_token) {
@@ -38,6 +46,17 @@ export const useUserStore = defineStore('user', {
       const res = await getUserInfo()
       this.user = res.data.user
       return this.user
+    },
+    async fetchAdminDepts() {
+      try {
+        const res = await getMyAdminDepts()
+        this.adminDepts = res.data || []
+      } catch (e) {
+        this.adminDepts = []
+      } finally {
+        this.adminDeptsLoaded = true
+      }
+      return this.adminDepts
     },
     async logout() {
       try {
