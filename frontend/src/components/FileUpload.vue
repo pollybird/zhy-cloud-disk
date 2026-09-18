@@ -48,6 +48,11 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { checkDuplicate, uploadFiles } from '../api/file'
+import {
+  shouldUseChunk,
+  tryInstant,
+  uploadInChunks,
+} from '../utils/chunkUploader'
 
 const props = defineProps({
   parentId: { type: [Number, null], default: null },
@@ -66,6 +71,7 @@ const controllers = new Map()
 const statusText = {
   hashing: '计算指纹',
   uploading: '上传中',
+  instant: '秒传',
   success: '成功',
   error: '失败',
   canceled: '已取消',
@@ -74,6 +80,7 @@ const statusText = {
 const statusType = {
   hashing: 'warning',
   uploading: 'primary',
+  instant: 'success',
   success: 'success',
   error: 'danger',
   canceled: 'info',
@@ -81,7 +88,9 @@ const statusType = {
 }
 
 const hasBusy = computed(() =>
-  tasks.value.some((t) => t.status === 'uploading' || t.status === 'hashing'),
+  tasks.value.some(
+    (t) => ['uploading', 'hashing', 'instant'].includes(t.status),
+  ),
 )
 
 function beforeUpload() {
@@ -176,6 +185,85 @@ async function doUpload(file, task, { mode = 'normal', fileHash = null, overwrit
   }
 }
 
+function isAbortError(e) {
+  return Boolean(
+    e?.canceled
+    || e?.code === 'ERR_CANCELED'
+    || e?.name === 'CanceledError',
+  )
+}
+
+/**
+ * 大文件分片上传（含断点续传、并发 3、单片重试 3）。
+ */
+async function doChunkedUpload(file, task, hash) {
+  const controller = new AbortController()
+  controllers.set(task.uid, { controller })
+  task.status = 'uploading'
+  task.progress = 0
+  task.message = '分片上传（可断点续传）'
+  try {
+    await uploadInChunks({
+      file,
+      hash,
+      parentId: props.parentId || null,
+      departmentId: props.departmentId || null,
+      onProgress: (p) => { task.progress = p },
+      signal: controller.signal,
+    })
+    task.status = 'success'
+    task.progress = 100
+    task.message = ''
+    hasSuccess = true
+  } catch (e) {
+    task.status = isAbortError(e) ? 'canceled' : 'error'
+    task.message = isAbortError(e) ? '已取消，稍后可继续上传' : (e.msg || '分片上传失败')
+  } finally {
+    controllers.delete(task.uid)
+  }
+}
+
+/**
+ * 正常新文件（非覆盖）：先尝试跨用户秒传，未命中再按大小选择分片/整文件上传。
+ * 秒传服务不可用时静默降级。
+ */
+async function doUploadOrInstant(file, task, hash) {
+  try {
+    task.status = 'instant'
+    task.message = '检测秒传…'
+    const r = await tryInstant({
+      file,
+      hash,
+      parentId: props.parentId || null,
+      departmentId: props.departmentId || null,
+    })
+    if (r.instant) {
+      task.progress = 100
+      if (r.skipped) {
+        task.status = 'skipped'
+        task.message = '内容一致，已跳过'
+      } else {
+        task.status = 'instant'
+        task.message = '秒传成功（秒级完成）'
+      }
+      hasSuccess = true
+      return
+    }
+  } catch (e) {
+    if (isAbortError(e)) {
+      task.status = 'canceled'
+      return
+    }
+    // 秒传检测失败不影响正常上传
+  }
+
+  if (shouldUseChunk(file)) {
+    await doChunkedUpload(file, task, hash)
+  } else {
+    await doUpload(file, task, { fileHash: hash })
+  }
+}
+
 async function customUpload({ file }) {
   const task = reactive({
     uid: ++uidSeq,
@@ -261,8 +349,8 @@ async function customUpload({ file }) {
         overwriteId: existing.id,
       })
     } else {
-      // 共存
-      await doUpload(file, task, { mode: 'normal', fileHash: hash })
+      // 共存（服务端自动改名），同样可秒传/分片
+      await doUploadOrInstant(file, task, hash)
     }
   } catch (e) {
     // 预检失败，降级为普通上传

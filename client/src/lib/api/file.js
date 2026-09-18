@@ -6,6 +6,7 @@ import http from './client.js'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
+import { downloadResumable } from '../sync/range-downloader.js'
 
 /**
  * 列出文件/文件夹（分页）。
@@ -82,6 +83,64 @@ export async function checkDuplicate(parentId, fileName, fileHash = null) {
 }
 
 /**
+ * 1.2.0 跨用户秒传：凭 MD5+大小零流量建引用。
+ * POST /api/file/instant
+ * @returns {Promise<{instant:boolean, skipped?:boolean, node?:object}>}
+ */
+export async function instantUpload(payload) {
+  const res = await http.post('/api/file/instant', payload)
+  return res.data
+}
+
+/**
+ * 1.2.0 分片上传：初始化/恢复会话。
+ * POST /api/file/chunk/init
+ * @returns {Promise<{instant:boolean, upload_id?:string, total_chunks?:number, received?:number[]}>}
+ */
+export async function chunkInit(payload) {
+  const res = await http.post('/api/file/chunk/init', payload)
+  return res.data
+}
+
+/**
+ * 上传单个分片（Buffer，由主进程 fs 切片产生）。
+ * POST /api/file/chunk/upload
+ */
+export async function uploadChunkPart(uploadId, index, buffer, chunkHash = null, signal = null) {
+  const fd = new FormData()
+  fd.append('upload_id', uploadId)
+  fd.append('index', String(index))
+  fd.append('chunk', new Blob([buffer]), `${index}.part`)
+  if (chunkHash) fd.append('chunk_hash', chunkHash)
+  const res = await http.post('/api/file/chunk/upload', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    timeout: 0,
+    signal: signal || undefined,
+  })
+  return res.data
+}
+
+/** 合并分片完成上传。POST /api/file/chunk/complete */
+export async function chunkComplete(uploadId) {
+  const res = await http.post('/api/file/chunk/complete', { upload_id: uploadId })
+  return res.data
+}
+
+/** 取消分片会话（尽力而为，服务端 GC 兜底）。POST /api/file/chunk/abort */
+export async function chunkAbort(uploadId) {
+  const res = await http.post('/api/file/chunk/abort', { upload_id: uploadId })
+  return res.data
+}
+
+/** 查询会话已收分片（断点恢复）。GET /api/file/chunk/status */
+export async function chunkStatus(uploadId) {
+  const res = await http.get('/api/file/chunk/status', { params: { upload_id: uploadId } })
+  return res.data
+}
+
+/**
  * 创建文件夹。
  * POST /api/folder/create
  * body: { parent_id, file_name }
@@ -124,5 +183,30 @@ export async function moveNode(id, targetParentId) {
  */
 export async function deleteNode(id) {
   const res = await http.delete('/api/file/delete', { data: { id } })
+  return res.data
+}
+
+/**
+ * 1.2.0 部门文件排他编辑锁。
+ * 打开编辑前 acquire（幂等续约），编辑期间 heartbeat（约 30s），
+ * 保存/关闭后 release；他人持锁时 acquire 抛 code=3501，err.data.user_name 为持有者。
+ */
+export async function lockAcquire(id) {
+  const res = await http.post('/api/file/lock/acquire', { id })
+  return res.data
+}
+
+export async function lockHeartbeat(id) {
+  const res = await http.post('/api/file/lock/heartbeat', { id })
+  return res.data
+}
+
+export async function lockRelease(id, force = false) {
+  const res = await http.post('/api/file/lock/release', { id, force })
+  return res.data
+}
+
+export async function lockStatus(id) {
+  const res = await http.get('/api/file/lock/status', { params: { id } })
   return res.data
 }

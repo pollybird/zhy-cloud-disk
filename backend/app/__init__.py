@@ -109,12 +109,15 @@ def _import_models() -> None:
     from .models import (  # noqa: F401
         department,
         download_log,
+        file_blob,
+        file_lock,
         file_node,
         file_permission,
         operation_log,
         plugin,
         share,
         system_setting,
+        upload_session,
         user,
     )
 

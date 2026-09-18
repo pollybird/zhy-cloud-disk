@@ -149,7 +149,8 @@ describe('内容变更', () => {
     expect(tasks.length).toBe(1)
     expect(tasks[0].type).toBe('download')
     // 冲突副本命名规则：词干 + " (服务器冲突 时间戳)" + 扩展名
-    expect(tasks[0].localPath).toBe('/sync/a (服务器冲突 ' + Date.now() + ').txt')
+    // 时间戳在执行期生成，断言时可能已跨毫秒，用正则校验
+    expect(tasks[0].localPath).toMatch(/^\/sync\/a \(服务器冲突 \d+\)\.txt$/)
     expect(emit).toHaveBeenCalledWith(EVENTS.CONFLICT, expect.objectContaining({ serverNode: changedNode }))
   })
 

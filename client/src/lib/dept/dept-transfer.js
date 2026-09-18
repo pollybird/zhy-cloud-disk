@@ -13,8 +13,8 @@ import { downloadFile } from '../api/file.js'
 import {
   checkDeptDuplicate,
   listDeptFiles,
-  uploadDeptFile,
 } from '../api/department.js'
+import { uploadLocal } from '../sync/chunk-uploader.js'
 
 const PAGE_SIZE = 200
 
@@ -87,7 +87,10 @@ export async function executeUploads(plans, {
 
   for (let i = 0; i < todo.length; i += 1) {
     const p = todo[i]
-    const emit = (percent) => onProgress?.({ index: i + 1, total: todo.length, fileName: p.fileName, percent })
+    const emit = (percent, instant = false) => onProgress?.({
+      index: i + 1, total: todo.length, fileName: p.fileName, percent,
+      mode: instant ? 'instant' : undefined,
+    })
     emit(0)
     try {
       const payload = {
@@ -101,10 +104,10 @@ export async function executeUploads(plans, {
         payload.overwriteId = p.existing?.id
       }
       const res = await upload(p.path, payload)
-      // 服务端返回 { success:[node...], failed:[...] }
-      const node = res?.success?.[0] || res
-      success.push({ plan: p, node })
-      emit(100)
+      // uploadLocal 返回 { node, instant }；兼容旧封装 { success:[node...] }
+      const node = res?.node || res?.success?.[0] || res
+      success.push({ plan: p, node, instant: Boolean(res?.instant) })
+      emit(100, res?.instant)
     } catch (e) {
       failed.push({ plan: p, message: e.message })
       emit(100)
@@ -169,7 +172,10 @@ export async function downloadItems(nodes, targetDir, {
       } catch (e) {
         if (e.code !== 'ENOENT') throw e
       }
-      await download(task.id, fullPath)
+      await download(task.id, fullPath, {
+        expectedSize: task.fileSize,
+        expectedHash: task.fileHash,
+      })
       done += 1
     } catch (e) {
       failed.push({ name: task.fileName, message: e.message })

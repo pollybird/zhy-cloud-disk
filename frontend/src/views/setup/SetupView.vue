@@ -4,15 +4,15 @@
       <template #header>
         <div class="setup-header">
           <h2>钟毓私有云盘 · 安装向导</h2>
-          <p class="sub">首次运行，请完成环境检测、数据库配置与超级管理员初始化</p>
+          <p class="sub">首次运行，请完成环境检测与超级管理员初始化</p>
         </div>
       </template>
 
       <el-steps :active="active" align-center finish-status="success" class="steps">
         <el-step title="欢迎" />
         <el-step title="环境检测" />
-        <el-step title="数据库" />
-        <el-step title="功能选项" />
+        <el-step v-if="!isDocker" title="数据库" />
+        <el-step v-if="!isDocker" title="功能选项" />
         <el-step title="管理员" />
         <el-step title="完成" />
       </el-steps>
@@ -67,6 +67,15 @@
         </el-descriptions>
 
         <el-alert
+          v-if="isDocker && !envLoading"
+          title="Docker 环境：MySQL 与 Redis 已内置，无需手动配置数据库"
+          type="success"
+          :closable="false"
+          show-icon
+          class="step-alert"
+        />
+
+        <el-alert
           v-if="!envLoading && (!env.instance_writable || !env.storage_writable)"
           title="存在不可写目录，请先修复目录权限后刷新重试"
           type="error"
@@ -82,7 +91,7 @@
           <el-button
             type="primary"
             :disabled="envLoading || !env.instance_writable || !env.storage_writable"
-            @click="active = 2"
+            @click="active = isDocker ? adminStep : 2"
           >
             下一步
           </el-button>
@@ -201,7 +210,7 @@
       </div>
 
       <!-- 步骤四：超级管理员 -->
-      <div v-show="active === 4" class="step-pane">
+      <div v-show="active === adminStep" class="step-pane">
         <el-form
           ref="adminFormRef"
           :model="adminForm"
@@ -239,7 +248,7 @@
         </el-form>
 
         <div class="step-actions">
-          <el-button @click="active = 3">上一步</el-button>
+          <el-button @click="active = isDocker ? 1 : 3">上一步</el-button>
           <el-button type="primary" @click="handleSubmit">
             <el-icon><Check /></el-icon>&nbsp;开始安装
           </el-button>
@@ -247,7 +256,7 @@
       </div>
 
       <!-- 步骤五：执行结果 -->
-      <div v-show="active === 5" class="step-pane result-pane">
+      <div v-show="active === completeStep" class="step-pane result-pane">
         <el-result
           :icon="installing ? 'info' : 'success'"
           :title="installing ? '正在安装…' : '安装完成'"
@@ -273,6 +282,9 @@ import { ZHY_VERSION } from '../../constants'
 
 const active = ref(0)
 const envLoading = ref(false)
+const isDocker = ref(false)
+const adminStep = computed(() => (isDocker.value ? 2 : 4))
+const completeStep = computed(() => (isDocker.value ? 3 : 5))
 const env = reactive({
   python_version: '',
   platform: '',
@@ -359,6 +371,10 @@ async function loadEnvironment() {
   try {
     const res = await getEnvironment(adminForm.storage_dir || undefined)
     Object.assign(env, res.data)
+    if (res.data.docker) {
+      isDocker.value = true
+      dbTested.value = true
+    }
   } finally {
     envLoading.value = false
   }
@@ -411,33 +427,37 @@ async function handleSubmit() {
   if (!adminFormRef.value) return
   await adminFormRef.value.validate(async (valid) => {
     if (!valid) return
-    if (!dbTested.value) {
+    if (!isDocker.value && !dbTested.value) {
       ElMessage.warning('请先完成数据库连接测试')
       active.value = 2
       return
     }
-    active.value = 5
+    active.value = completeStep.value
     installing.value = true
     installProgress.value = 45
     try {
       const payload = {
-        ...dbPayload(),
         admin_username: adminForm.admin_username.trim(),
         admin_email: adminForm.admin_email.trim(),
         admin_password: adminForm.admin_password,
-        department_drive_enabled: enableDepartment.value,
+        department_drive_enabled: isDocker.value ? true : enableDepartment.value,
+      }
+      if (isDocker.value) {
+        payload.db_type = 'mysql'
+      } else {
+        Object.assign(payload, dbPayload())
+        if (dbForm.redis_url.trim()) {
+          payload.redis_url = dbForm.redis_url.trim()
+        }
       }
       if (adminForm.storage_dir.trim()) {
         payload.storage_dir = adminForm.storage_dir.trim()
-      }
-      if (dbForm.redis_url.trim()) {
-        payload.redis_url = dbForm.redis_url.trim()
       }
       const res = await install(payload)
       installProgress.value = 100
       installResult.value = res.data
     } catch (e) {
-      active.value = 4
+      active.value = adminStep.value
     } finally {
       installing.value = false
     }

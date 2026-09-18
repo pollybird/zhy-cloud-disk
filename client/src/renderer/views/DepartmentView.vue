@@ -286,6 +286,7 @@ const transfer = reactive({
   fileName: '',
   percent: 0,
   status: '',
+  mode: '',
 })
 const transferTitle = computed(() => (transfer.phase === 'download' ? '下载到本地' : '上传到部门网盘'))
 const transferPercent = computed(() => {
@@ -409,7 +410,11 @@ async function openRow(row) {
   try {
     const data = await unwrap(window.zhy.dept.openFile(toPlain(row)))
     if (data.access === 'read_write') {
-      ElMessage.success(`已打开「${row.file_name}」，在外部程序保存后将自动回传`)
+      ElMessage.success(`已打开「${row.file_name}」，在外部程序保存后将自动回传并解除锁定`)
+    } else if (data.lockedBy) {
+      ElMessage.info(
+        `「${row.file_name}」正被「${data.lockedBy}」编辑，已以只读方式打开；对方保存后即可编辑`
+      )
     } else {
       ElMessage.info(`「${row.file_name}」以只读方式打开，修改请用「下载」另存，不会回传服务器`)
     }
@@ -490,6 +495,7 @@ async function runUploadGroups(groups) {
     fileName: '',
     percent: 0,
     status: '',
+    mode: '',
   })
   try {
     const res = await uploadGroupsToDept(groups, {

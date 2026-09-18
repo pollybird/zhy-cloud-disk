@@ -1,6 +1,6 @@
 {
   "name": "zhyclouddisk-client",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "钟毓私有云盘同步客户端",
   "author": "泰州姜堰钟毓信息技术有限公司",
@@ -12,9 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "package": "electron-vite build && electron-builder",
-    "package:win": "electron-vite build && electron-builder --win nsis",
+    "package:win": "electron-vite build && electron-builder --win portable",
     "package:linux": "electron-vite build && electron-builder --linux AppImage",
-    "package:mac": "electron-vite build && electron-builder --mac dmg"
+    "package:mac": "electron-vite build && electron-builder --mac zip"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

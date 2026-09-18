@@ -3,8 +3,11 @@
  *
  * 核心原则（方案 6.2 / 6.3）：
  * - 双击文件 → 下载到系统临时目录 zhyCloudDeptCache/dept-<deptId>/ → 系统默认程序打开
- * - read_write：监听临时文件保存，去抖后自动覆盖回传，并在回传期间合并连续保存
- * - read_only：落盘即置为只读（Office 类程序会强制走「另存为」），管理器绝不回传
+ * - read_write：打开前先获取后端排他编辑锁（1.2.0），抢到才以读写打开；
+ *   监听临时文件保存，去抖后自动覆盖回传，回传成功后释放锁（他人随即恢复可编辑）；
+ *   编辑期间定时心跳续约，退出/关闭时兜底释放
+ * - 抢锁失败（他人编辑中）或 read_only：落盘即置为只读（Office 类程序会强制走
+ *   「另存为」），管理器绝不回传
  * - 退出客户端时尽力清空缓存；启动时删除超期（默认 7 天）残留
  *
  * 所有外部依赖均可通过 createTempFileManager(options) 注入，便于单测。
@@ -16,11 +19,13 @@ import fsp from 'fs/promises'
 import chokidar from 'chokidar'
 import { shell } from 'electron'
 import { computeMd5 } from '../sync/hasher.js'
-import { downloadFile } from '../api/file.js'
+import { downloadFile, lockAcquire, lockHeartbeat, lockRelease } from '../api/file.js'
 import { uploadDeptFile } from '../api/department.js'
 
 const DEFAULT_DEBOUNCE_MS = 800
 const DEFAULT_TTL_MS = 7 * 24 * 3600 * 1000 // 7 天
+const DEFAULT_HEARTBEAT_MS = 30 * 1000 // 后端锁 TTL 为 120s，30s 续约一次
+const LOCK_CONFLICT_CODE = 3501
 const RO_MODE = 0o444
 const RW_MODE = 0o666
 
@@ -48,22 +53,30 @@ function defaultWatcherFactory(root, handler) {
  * @param {(filePath:string)=>Promise<string>} [options.md5]
  * @param {(filePath:string, payload:object)=>Promise<object>} [options.uploader]
  * @param {(root:string, handler:(event:string,filePath:string)=>void)=>{close:Function}} [options.watcherFactory]
+ * @param {{acquire:Function,heartbeat:Function,release:Function}} [options.locker] 排他锁接口
+ * @param {number} [options.heartbeatMs] 锁心跳间隔
  * @param {(toast:{type:string,message:string})=>void} [options.onToast]
  * @param {()=>number} [options.now]
  */
 export function createTempFileManager(options = {}) {
   const cacheRoot = options.cacheRoot || path.join(os.tmpdir(), 'zhyCloudDeptCache')
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS
+  const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS
   const downloader = options.downloader || ((fileId, savePath) => downloadFile(fileId, savePath))
   const opener = options.opener || ((p) => shell.openPath(p))
   const md5 = options.md5 || computeMd5
   const uploader =
     options.uploader || ((filePath, payload) => uploadDeptFile(filePath, payload))
   const watcherFactory = options.watcherFactory || defaultWatcherFactory
+  const locker = options.locker || {
+    acquire: lockAcquire,
+    heartbeat: lockHeartbeat,
+    release: lockRelease,
+  }
   const onToast = options.onToast || (() => {})
   const now = options.now || (() => Date.now())
 
-  /** @type {Map<string, {fileId:number,deptId:number,parentId:number|null,fileName:string,access:string,baseline:string,uploading:boolean,dirty:boolean,timer:NodeJS.Timeout|null,readOnly:boolean}>} */
+  /** @type {Map<string, {fileId:number,deptId:number|null,parentId:number|null,fileName:string,access:string,baseline:string,uploading:boolean,dirty:boolean,timer:NodeJS.Timeout|null,readOnly:boolean,locked:boolean,lockedBy:string|null,lockTimer:NodeJS.Timeout|null}>} */
   const tracked = new Map()
   let watcher = null
 
@@ -107,6 +120,81 @@ export function createTempFileManager(options = {}) {
     rec.timer.unref?.()
   }
 
+  function stopHeartbeat(rec) {
+    if (rec.lockTimer) {
+      clearInterval(rec.lockTimer)
+      rec.lockTimer = null
+    }
+  }
+
+  function startHeartbeat(rec) {
+    stopHeartbeat(rec)
+    rec.lockTimer = setInterval(async () => {
+      try {
+        await locker.heartbeat(rec.fileId)
+      } catch (e) {
+        if (e?.code === LOCK_CONFLICT_CODE) {
+          // 锁已易主（如被管理员强制释放后他人获取）：立即降级为只读
+          await downgradeToReadOnly(rec, e.data?.user_name || null)
+        }
+        // 网络抖动等忽略，下个周期重试；最坏由后端 TTL 兜底
+      }
+    }, heartbeatMs)
+    rec.lockTimer.unref?.()
+  }
+
+  async function downgradeToReadOnly(rec, holderName) {
+    if (rec.readOnly) return
+    stopHeartbeat(rec)
+    rec.locked = false
+    rec.access = 'read_only'
+    rec.readOnly = true
+    if (holderName) rec.lockedBy = holderName
+    try {
+      await fsp.chmod(rec.filePath, RO_MODE)
+    } catch {
+      // 文件占用等：权限位设置失败不影响后端写拦截
+    }
+    const who = holderName ? `被「${holderName}」锁定` : '编辑锁已失效'
+    onToast({
+      type: 'warning',
+      message: `「${rec.fileName}」${who}，已转为只读，本次之后的修改不会回传`,
+    })
+  }
+
+  /** 回传前确保持有锁；上一次保存已释放锁时按本次保存重新抢锁。成功返回 true。 */
+  async function ensureLockedForSave(rec) {
+    if (rec.locked) return true
+    try {
+      await locker.acquire(rec.fileId)
+      rec.locked = true
+      startHeartbeat(rec)
+      return true
+    } catch (e) {
+      if (e?.code === LOCK_CONFLICT_CODE) {
+        const who = e.data?.user_name ? `被「${e.data.user_name}」编辑` : '已被他人锁定'
+        onToast({
+          type: 'error',
+          message: `「${rec.fileName}」${who}，本次修改未回传，请稍后重新打开文件`,
+        })
+        return false
+      }
+      throw e
+    }
+  }
+
+  /** 保存成功后释放锁（需求：保存后他人立即恢复可编辑）。释放失败则保留锁并续心跳。 */
+  async function releaseAfterSave(rec) {
+    stopHeartbeat(rec)
+    try {
+      await locker.release(rec.fileId)
+      rec.locked = false
+    } catch {
+      // 网络异常：锁可能仍在服务端，保留并继续续约，下次保存或退出时再释放
+      startHeartbeat(rec)
+    }
+  }
+
   async function syncBack(rec) {
     if (rec.uploading) {
       // 回传中又有保存：标记脏，回传完成后再来一次
@@ -123,6 +211,8 @@ export function createTempFileManager(options = {}) {
         return
       }
       if (hash === rec.baseline) return
+      // 部门文件：保存即一次编辑事务，先确保持锁，防止与他人并发写
+      if (rec.deptId != null && !(await ensureLockedForSave(rec))) return
       await uploader(rec.filePath, {
         departmentId: rec.deptId,
         parentId: rec.parentId,
@@ -130,6 +220,7 @@ export function createTempFileManager(options = {}) {
         overwriteId: rec.fileId,
       })
       rec.baseline = hash
+      if (rec.deptId != null && rec.locked) await releaseAfterSave(rec)
       onToast({ type: 'success', message: `「${rec.fileName}」修改已自动回传部门网盘` })
     } catch (e) {
       onToast({ type: 'error', message: `「${rec.fileName}」回传失败：${e.message}` })
@@ -147,12 +238,40 @@ export function createTempFileManager(options = {}) {
 
     /**
      * 下载部门文件到临时目录并以系统程序打开。
+     *
+     * 部门读写文件先抢后端排他锁：抢到 → 读写打开 + 心跳；他人持锁 → 只读打开。
+     * 只读权限 / 个人文件不抢锁。锁服务不可达（网络等）时不阻断打开，按读写放行，
+     * 由后端写拦截与下次保存重试兜底。
+     *
      * @param {object} node 服务端文件节点（非文件夹）
-     * @returns {Promise<{filePath:string, access:string}>}
+     * @returns {Promise<{filePath:string, access:string, locked:boolean, lockedBy:string|null}>}
      */
     async openForEdit(node) {
-      const access = node.access || 'read_only'
-      const dir = deptDir(node.department_id)
+      const isDept = node.department_id != null
+      let access = node.access || 'read_only'
+      let locked = false
+      let lockedBy = null
+
+      if (isDept && access === 'read_write') {
+        try {
+          await locker.acquire(node.id)
+          locked = true
+        } catch (e) {
+          if (e?.code === LOCK_CONFLICT_CODE) {
+            // 他人正在编辑：降级只读
+            access = 'read_only'
+            lockedBy = e.data?.user_name || null
+          } else {
+            // 锁服务异常：放行读写但不持锁，保存时会再次尝试抢锁
+            onToast({
+              type: 'warning',
+              message: `暂无法确认「${node.file_name}」的编辑锁状态：${e.message}`,
+            })
+          }
+        }
+      }
+
+      const dir = deptDir(node.department_id ?? 'personal')
       await fsp.mkdir(dir, { recursive: true })
       const target = uniquePath(dir, node.file_name)
 
@@ -162,7 +281,10 @@ export function createTempFileManager(options = {}) {
       } catch {
         // 不存在
       }
-      await downloader(node.id, target)
+      await downloader(node.id, target, {
+        expectedSize: node.file_size ?? null,
+        expectedHash: node.file_hash ?? null,
+      })
 
       const baseline = await md5(target)
 
@@ -171,10 +293,10 @@ export function createTempFileManager(options = {}) {
         await fsp.chmod(target, RO_MODE)
       }
 
-      tracked.set(target, {
+      const rec = {
         filePath: target,
         fileId: node.id,
-        deptId: node.department_id,
+        deptId: isDept ? node.department_id : null,
         parentId: node.parent_id ?? null,
         fileName: node.file_name,
         access,
@@ -183,11 +305,16 @@ export function createTempFileManager(options = {}) {
         dirty: false,
         timer: null,
         readOnly,
-      })
+        locked,
+        lockedBy,
+        lockTimer: null,
+      }
+      tracked.set(target, rec)
 
       ensureWatcher()
+      if (locked) startHeartbeat(rec)
       await opener(target)
-      return { filePath: target, access }
+      return { filePath: target, access, locked, lockedBy }
     },
 
     /** 测试 / 内部：模拟一次外部保存事件。 */
@@ -202,13 +329,23 @@ export function createTempFileManager(options = {}) {
     },
 
     /**
-     * 停止监听（不删除缓存文件）。
+     * 停止监听（不删除缓存文件）；持有的编辑锁全部尽力释放。
      */
     async stopWatching() {
+      const pending = []
       for (const rec of tracked.values()) {
         if (rec.timer) clearTimeout(rec.timer)
         rec.timer = null
+        stopHeartbeat(rec)
+        if (rec.deptId != null && rec.locked) {
+          pending.push(
+            Promise.resolve(locker.release(rec.fileId)).catch(() => {
+              // 退出时网络异常忽略，后端 TTL 兜底
+            })
+          )
+        }
       }
+      await Promise.all(pending)
       tracked.clear()
       if (watcher) {
         await watcher.close()

@@ -1,80 +1,39 @@
 services:
-  backend:
-    build: ./backend
-    container_name: zhy-backend
+  app:
+    build: .
+    container_name: zhy-app
     restart: unless-stopped
     environment:
-      # ---- 实例与存储目录（容器内固定，由 volume 映射持久化） ----
+      # ---- Docker 模式：内置 MySQL + Redis，无需配置数据库连接 ----
+      ZHY_DOCKER: "1"
       ZHY_INSTANCE_DIR: /app/instance
       ZHY_STORAGE_DIR: /app/storage
-      # ---- 环境变量静默安装（首次启动自动初始化超管与建库） ----
+      # ---- 超级管理员（首次启动静默安装生效） ----
       ZHY_ADMIN_USERNAME: ${ZHY_ADMIN_USERNAME:-admin}
       ZHY_ADMIN_PASSWORD: ${ZHY_ADMIN_PASSWORD:-Admin12345}
       ZHY_ADMIN_EMAIL: ${ZHY_ADMIN_EMAIL:-admin@zhy.local}
-      # ---- 数据库（默认 SQLite；切换 MySQL/PG 只需改下面几行） ----
-      ZHY_DB_TYPE: ${ZHY_DB_TYPE:-sqlite}
-      # MySQL/PG 模式取消注释：
-      # ZHY_DB_HOST: ${ZHY_DB_HOST}
-      # ZHY_DB_PORT: ${ZHY_DB_PORT:-3306}
-      # ZHY_DB_NAME: ${ZHY_DB_NAME:-zhycloud}
-      # ZHY_DB_USER: ${ZHY_DB_USER}
-      # ZHY_DB_PASSWORD: ${ZHY_DB_PASSWORD}
-      # 直连 DSN 优先级最高（同时设置时覆盖上面的分项）：
-      # ZHY_DATABASE_URL: mysql+pymysql://user:pass@host:3306/zhycloud
-      # ---- Redis（可选；留空自动降级内存缓存） ----
-      ZHY_REDIS_URL: ${ZHY_REDIS_URL:-redis://redis:6379/0}
+      # ---- 部门共享网盘（首次安装生效；默认开启） ----
+      ZHY_DEPARTMENT_DRIVE: ${ZHY_DEPARTMENT_DRIVE:-true}
       # ---- JWT 有效期 ----
       ZHY_JWT_ACCESS_HOURS: ${ZHY_JWT_ACCESS_HOURS:-2}
       ZHY_JWT_REFRESH_DAYS: ${ZHY_JWT_REFRESH_DAYS:-30}
       # ---- 默认配额（字节；默认 5GiB） ----
       ZHY_DEFAULT_QUOTA: ${ZHY_DEFAULT_QUOTA:-5368709120}
-      # ---- 部门共享网盘（true 开启；仅首次静默安装生效，之后在系统设置中切换） ----
-      ZHY_DEPARTMENT_DRIVE: ${ZHY_DEPARTMENT_DRIVE:-false}
       # ---- CORS ----
       ZHY_CORS_ORIGINS: ${ZHY_CORS_ORIGINS:-*}
     volumes:
-      - backend-instance:/app/instance
-      - backend-storage:/app/storage
-    # 默认仅绑定宿主机回环口（排障/直连用）；需对局域网客户端暴露时设
-    # ZHY_BACKEND_PORT=0.0.0.0:5000。常规部署无需开放：桌面客户端经 frontend
-    # 网关的 /api/ 反代访问后端，服务器地址与 Web 端相同。
+      - app-instance:/app/instance
+      - app-storage:/app/storage
+      - app-mysql:/var/lib/mysql
     ports:
-      - "${ZHY_BACKEND_PORT:-127.0.0.1:5000}:5000"
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - zhy-net
-
-  frontend:
-    build: ./frontend
-    container_name: zhy-frontend
-    restart: unless-stopped
-    ports:
-      - "${ZHY_WEB_PORT:-80}:80"
-    depends_on:
-      - backend
-    networks:
-      - zhy-net
-
-  redis:
-    image: redis:7-alpine
-    container_name: zhy-redis
-    restart: unless-stopped
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+      - "${ZHY_WEB_PORT:-8080}:80"
     networks:
       - zhy-net
 
 volumes:
-  backend-instance:
-  backend-storage:
-  redis-data:
+  app-instance:
+  app-storage:
+  app-mysql:
 
 networks:
   zhy-net:

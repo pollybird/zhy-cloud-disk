@@ -29,18 +29,26 @@ function makeManager(overrides = {}) {
   const downloader = vi.fn(async (_id, savePath) => {
     await fsp.writeFile(savePath, 'v1-content')
   })
+  // 默认 locker：全部成功（1.2.0 排他编辑锁）
+  const locker = {
+    acquire: vi.fn(async () => ({ locked: true, held_by_me: true })),
+    heartbeat: vi.fn(async () => ({})),
+    release: vi.fn(async () => ({ locked: false })),
+  }
   const manager = createTempFileManager({
     cacheRoot,
     debounceMs: 30,
+    heartbeatMs: 60000,
     downloader,
     opener,
     uploader,
     onToast,
     watcherFactory,
+    locker,
     md5: computeMd5,
     ...overrides,
   })
-  return { manager, opener, uploader, onToast, watcherFactory, downloader }
+  return { manager, opener, uploader, onToast, watcherFactory, downloader, locker }
 }
 
 const node = (id, access = 'read_write', fileName = 'a.txt') => ({
@@ -203,5 +211,155 @@ describe('缓存清理', () => {
     const { manager } = makeManager()
     await fsp.rm(cacheRoot, { recursive: true, force: true })
     await expect(manager.cleanExpired()).resolves.toBe(0)
+  })
+})
+
+describe('1.2.0 排他编辑锁', () => {
+  const conflictError = (name = 'lockA') => {
+    const e = new Error(`文件正被「${name}」编辑`)
+    e.code = 3501
+    e.data = { user_id: 9, user_name: name }
+    return e
+  }
+
+  it('读写部门文件：打开前 acquire，返回 locked=true', async () => {
+    const { manager, locker } = makeManager()
+    const ret = await manager.openForEdit(node(11))
+    expect(locker.acquire).toHaveBeenCalledWith(11)
+    expect(ret.locked).toBe(true)
+    expect(ret.access).toBe('read_write')
+  })
+
+  it('只读权限文件：不抢锁，按只读打开', async () => {
+    const { manager, locker } = makeManager()
+    const ret = await manager.openForEdit(node(12, 'read_only'))
+    expect(locker.acquire).not.toHaveBeenCalled()
+    expect(ret.locked).toBe(false)
+    expect(ret.access).toBe('read_only')
+  })
+
+  it('他人持锁（3501）：降级只读打开，返回 lockedBy，不回传', async () => {
+    const locker = {
+      acquire: vi.fn(async () => {
+        throw conflictError('张三')
+      }),
+      heartbeat: vi.fn(),
+      release: vi.fn(),
+    }
+    const { manager, uploader } = makeManager({ locker })
+    const ret = await manager.openForEdit(node(13))
+    expect(ret.access).toBe('read_only')
+    expect(ret.locked).toBe(false)
+    expect(ret.lockedBy).toBe('张三')
+    const st = await fsp.stat(ret.filePath)
+    expect(st.mode & 0o200).toBe(0)
+
+    watcherHandler('change', ret.filePath)
+    await sleep(80)
+    expect(uploader).not.toHaveBeenCalled()
+  })
+
+  it('锁服务网络异常：不阻断打开（读写放行），但不启动心跳', async () => {
+    const locker = {
+      acquire: vi.fn(async () => {
+        throw new Error('Network Error')
+      }),
+      heartbeat: vi.fn(),
+      release: vi.fn(),
+    }
+    const { manager, onToast } = makeManager({ locker })
+    const ret = await manager.openForEdit(node(14))
+    expect(ret.access).toBe('read_write')
+    expect(ret.locked).toBe(false)
+    expect(onToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'warning' })
+    )
+  })
+
+  it('个人文件（无 department_id）：不抢锁', async () => {
+    const { manager, locker } = makeManager()
+    const ret = await manager.openForEdit({ ...node(15), department_id: null })
+    expect(locker.acquire).not.toHaveBeenCalled()
+    expect(ret.locked).toBe(false)
+  })
+
+  it('保存回传成功后立即 release（他人恢复可编辑）', async () => {
+    const { manager, uploader, locker } = makeManager()
+    const ret = await manager.openForEdit(node(21))
+
+    await fsp.appendFile(ret.filePath, '\nedited-1')
+    watcherHandler('change', ret.filePath)
+    await sleep(90)
+
+    expect(uploader).toHaveBeenCalledTimes(1)
+    expect(locker.release).toHaveBeenCalledTimes(1)
+    expect(locker.release).toHaveBeenCalledWith(21)
+  })
+
+  it('释放后再次编辑：保存前重新抢锁，冲突则不回传并提示', async () => {
+    const { manager, uploader, locker } = makeManager()
+    const ret = await manager.openForEdit(node(22))
+
+    // 第一次保存：抢锁→上传→释放
+    await fsp.writeFile(ret.filePath, 'v2')
+    watcherHandler('change', ret.filePath)
+    await sleep(90)
+    expect(locker.release).toHaveBeenCalledTimes(1)
+
+    // 第二次保存：锁已被他人获取
+    locker.acquire.mockReset()
+    locker.acquire.mockRejectedValueOnce(conflictError('李四'))
+    await fsp.writeFile(ret.filePath, 'v3')
+    watcherHandler('change', ret.filePath)
+    await sleep(90)
+    expect(uploader).toHaveBeenCalledTimes(1) // 第二次未上传
+  })
+
+  it('心跳发现锁易主（3501）：文件降级只读，后续修改不回传', async () => {
+    const locker = {
+      acquire: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => {
+        throw conflictError('王五')
+      }),
+      release: vi.fn(async () => ({})),
+    }
+    const { manager, uploader } = makeManager({ locker, heartbeatMs: 25 })
+    const ret = await manager.openForEdit(node(23))
+    expect(ret.access).toBe('read_write')
+
+    await sleep(90)
+    const st = await fsp.stat(ret.filePath)
+    expect(st.mode & 0o200).toBe(0) // 已置只读
+
+    await fsp.chmod(ret.filePath, 0o666) // 即使本地能写
+    await fsp.appendFile(ret.filePath, 'late-edit')
+    watcherHandler('change', ret.filePath)
+    await sleep(80)
+    expect(uploader).not.toHaveBeenCalled()
+  })
+
+  it('stopWatching/cleanupAll：兜底释放持有的锁，只读打开的不释放', async () => {
+    const lockedLocker = {
+      acquire: vi.fn(async () => ({})),
+      heartbeat: vi.fn(async () => ({})),
+      release: vi.fn(async () => ({})),
+    }
+    const m1 = makeManager({ locker: lockedLocker })
+    await m1.manager.openForEdit(node(31))
+
+    const blockedLocker = {
+      acquire: vi.fn(async () => {
+        throw conflictError('张三')
+      }),
+      heartbeat: vi.fn(),
+      release: vi.fn(),
+    }
+    const m2 = makeManager({ locker: blockedLocker })
+    await m2.manager.openForEdit(node(32))
+
+    await Promise.all([m1.manager.stopWatching(), m2.manager.stopWatching()])
+    expect(lockedLocker.release).toHaveBeenCalledTimes(1)
+    expect(lockedLocker.release).toHaveBeenCalledWith(31)
+    expect(blockedLocker.release).not.toHaveBeenCalled()
   })
 })

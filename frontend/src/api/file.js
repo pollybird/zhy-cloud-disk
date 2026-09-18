@@ -40,6 +40,52 @@ export function checkDuplicate(payload) {
   })
 }
 
+// ---- 1.2.0 跨用户秒传 ----
+export function instantUpload(payload) {
+  return request({ url: '/api/file/instant', method: 'post', data: payload })
+}
+
+// ---- 1.2.0 分片上传 / 断点续传 ----
+export function chunkInit(payload) {
+  return request({ url: '/api/file/chunk/init', method: 'post', data: payload })
+}
+
+export function uploadChunk(formData, onProgress, signal) {
+  return request({
+    url: '/api/file/chunk/upload',
+    method: 'post',
+    data: formData,
+    timeout: 0,
+    headers: { 'Content-Type': 'multipart/form-data' },
+    signal,
+    onUploadProgress: (e) => {
+      if (onProgress && e.total && e.total > 0) onProgress(e)
+    },
+  })
+}
+
+export function chunkComplete(upload_id) {
+  return request({ url: '/api/file/chunk/complete', method: 'post', data: { upload_id } })
+}
+
+export function chunkAbort(upload_id) {
+  return request({
+    url: '/api/file/chunk/abort',
+    method: 'post',
+    data: { upload_id },
+    silent: true,
+  })
+}
+
+export function chunkStatus(upload_id) {
+  return request({
+    url: '/api/file/chunk/status',
+    method: 'get',
+    params: { upload_id },
+    silent: true,
+  })
+}
+
 export function createFolder(parent_id, file_name, department_id) {
   return request({
     url: '/api/folder/create',

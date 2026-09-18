@@ -96,6 +96,7 @@ def get_environment_info(storage_dir: str | None = None) -> dict:
         "storage_dir": str(storage_target),
         "storage_writable": _dir_writable(storage_target),
         "disk_free": disk_free,
+        "docker": os.environ.get("ZHY_DOCKER") == "1",
     }
 
 
@@ -259,6 +260,15 @@ def _do_install(app, payload: dict) -> dict:
     admin_email = validate_email(payload.get("admin_email", ""))
     admin_password = validate_password(payload.get("admin_password", ""))
 
+    # Docker 模式：自动使用内置 MySQL + Redis，跳过用户数据库配置
+    if os.environ.get("ZHY_DOCKER") == "1" and not payload.get("database_uri") and not payload.get("host"):
+        payload["database_uri"] = (
+            "mysql+pymysql://root@127.0.0.1:3306/zhycloud"
+            "?charset=utf8mb4&connect_timeout=8"
+        )
+        if not payload.get("redis_url"):
+            payload["redis_url"] = "redis://127.0.0.1:6379/0"
+
     # 2. 构造并复测数据库（支持直连 DSN 透传，用于环境变量静默安装）
     direct_uri = payload.get("database_uri")
     if direct_uri:
@@ -406,6 +416,36 @@ def maybe_auto_install(app) -> bool:
     """环境变量齐全且系统未安装时，执行静默初始化。返回是否执行了安装。"""
     if is_installed():
         return False
+
+    # Docker 模式：使用内置 MySQL + Redis，无需用户配置数据库
+    if os.environ.get("ZHY_DOCKER") == "1":
+        username = os.environ.get("ZHY_ADMIN_USERNAME")
+        password = os.environ.get("ZHY_ADMIN_PASSWORD")
+        if not username or not password:
+            return False
+        payload = {
+            "db_type": "mysql",
+            "database_uri": (
+                "mysql+pymysql://root@127.0.0.1:3306/zhycloud"
+                "?charset=utf8mb4&connect_timeout=8"
+            ),
+            "admin_username": username,
+            "admin_password": password,
+            "admin_email": (
+                os.environ.get("ZHY_ADMIN_EMAIL") or f"{username}@admin.local"
+            ),
+            "redis_url": "redis://127.0.0.1:6379/0",
+            "department_drive_enabled": os.environ.get(
+                "ZHY_DEPARTMENT_DRIVE", "1"
+            ).lower() in ("1", "true", "yes"),
+        }
+        if os.environ.get("ZHY_STORAGE_DIR"):
+            payload["storage_dir"] = os.environ["ZHY_STORAGE_DIR"]
+        run_installation(app, payload)
+        app.logger.info("Docker 静默安装完成，超级管理员：%s", username)
+        return True
+
+    # 普通环境变量模式
     username = os.environ.get("ZHY_ADMIN_USERNAME")
     password = os.environ.get("ZHY_ADMIN_PASSWORD")
     if not username or not password:

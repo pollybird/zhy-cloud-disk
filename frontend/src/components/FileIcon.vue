@@ -60,6 +60,21 @@
       fill="#ffffff"
       letter-spacing="0.3"
     >{{ visual.label || 'FILE' }}</text>
+    <!-- 1.2.0 排他编辑锁：他人正在编辑时右下角红色锁角标 -->
+    <g v-if="locked" aria-label="编辑锁定">
+      <title>{{ lockTip }}</title>
+      <circle cx="18.2" cy="23" r="4.4" fill="#ef4444" stroke="#ffffff" stroke-width="1" />
+      <path
+        d="M16.5 22.8v-1.1a1.7 1.7 0 0 1 3.4 0v1.1"
+        fill="none"
+        stroke="#ffffff"
+        stroke-width="1.05"
+        stroke-linecap="round"
+      />
+      <rect x="16" y="22.5" width="4.4" height="3.6" rx="0.8" fill="#ffffff" />
+      <circle cx="18.2" cy="23.9" r="0.62" fill="#ef4444" />
+      <rect x="17.98" y="24.05" width="0.44" height="1.15" rx="0.22" fill="#ef4444" />
+    </g>
   </svg>
 </template>
 
@@ -87,6 +102,14 @@ const visual = computed(() =>
     file_name: props.name || props.row.file_name,
     file_suffix: props.suffix || props.row.file_suffix,
   })
+)
+
+// 1.2.0 排他编辑锁角标（文件夹不加锁）
+const locked = computed(() => !visual.value.folder && !!props.row.locked)
+const lockTip = computed(() =>
+  props.row.lock_user_name
+    ? `文件正被「${props.row.lock_user_name}」编辑，当前只读`
+    : '文件正被他人编辑，当前只读'
 )
 </script>
 

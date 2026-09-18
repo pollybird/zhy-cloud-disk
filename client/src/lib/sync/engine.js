@@ -174,13 +174,13 @@ async function firstSync() {
       emit(EVENTS.PROGRESS, { current: ++count, total: files.length, fileName: file.file_name })
       await downloadFile(file.id, localPath)
       upsertRemoteNode(file, localPath)
-      const info = await getFileInfo(localPath)
+      const fileInfo = await getFileInfo(localPath)
       upsertLocalState({
         local_path: localPath,
         server_id: file.id,
-        local_mtime: info.mtime,
-        local_size: info.size,
-        local_md5: info.md5,
+        local_mtime: fileInfo.mtime,
+        local_size: fileInfo.size,
+        local_md5: fileInfo.md5,
         state: 'synced',
       })
       logSync('download', file.file_name, localPath, 'success')
@@ -220,16 +220,19 @@ function registerHandlers() {
   // 下载
   queue.register('download', async (task) => {
     info(`Downloading: ${task.localPath}`)
-    await downloadFile(task.serverId, task.localPath)
     const node = await getNodeFromServer(task.serverId)
+    await downloadFile(task.serverId, task.localPath, {
+      expectedSize: node?.file_size ?? null,
+      expectedHash: node?.file_hash ?? null,
+    })
     if (node) upsertRemoteNode(node, task.localPath)
-    const info = await getFileInfo(task.localPath)
+    const fileInfo = await getFileInfo(task.localPath)
     upsertLocalState({
       local_path: task.localPath,
       server_id: task.serverId,
-      local_mtime: info.mtime,
-      local_size: info.size,
-      local_md5: info.md5,
+      local_mtime: fileInfo.mtime,
+      local_size: fileInfo.size,
+      local_md5: fileInfo.md5,
       state: 'synced',
     })
     logSync('download', path.basename(task.localPath), task.localPath, 'success')
@@ -298,24 +301,31 @@ function registerHandlers() {
       return
     }
 
-    // action === 'upload'
-    const node = await uploadFile(task.localPath, task.serverParentId, md5, 'normal')
-    if (node.success && node.success.length > 0) {
-      upsertRemoteNode(node.success[0], task.localPath)
-      const fi = await getFileInfo(task.localPath)
-      upsertLocalState({
-        local_path: task.localPath,
-        server_id: node.success[0].id,
-        local_mtime: fi.mtime,
-        local_size: fi.size,
-        local_md5: md5,
-        state: 'synced',
-      })
-      logSync('upload', fileName, task.localPath, 'success')
-    } else {
-      const msg = node.failed?.[0]?.msg || '上传响应异常'
-      throw new Error(msg)
+    // action === 'upload'：1.2.0 起先秒传、大文件分片续传
+    const { node: uploadedNode, instant } = await uploadLocal(task.localPath, {
+      parentId: task.serverParentId,
+      fileHash: md5,
+    })
+    if (!uploadedNode?.id) {
+      throw new Error('上传响应异常')
     }
+    upsertRemoteNode(uploadedNode, task.localPath)
+    const fi = await getFileInfo(task.localPath)
+    upsertLocalState({
+      local_path: task.localPath,
+      server_id: uploadedNode.id,
+      local_mtime: fi.mtime,
+      local_size: fi.size,
+      local_md5: md5,
+      state: 'synced',
+    })
+    logSync(
+      'upload',
+      fileName,
+      task.localPath,
+      'success',
+      instant ? '秒传完成' : undefined,
+    )
   })
 
   // 远端删除

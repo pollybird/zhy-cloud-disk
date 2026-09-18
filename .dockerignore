@@ -1,0 +1,13 @@
+client/
+.git/
+*.md
+docker-compose.yml
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/tests/
+backend/instance/
+backend/storage/
+frontend/dist/
+.env
+.gitignore

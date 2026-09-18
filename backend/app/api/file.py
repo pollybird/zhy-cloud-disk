@@ -62,6 +62,152 @@ def check_duplicate():
     return success(result)
 
 
+@bp.post("/file/instant")
+@login_required
+def instant_upload():
+    """跨用户秒传：凭整文件 MD5+大小直接建引用，零上传流量。"""
+    data = request.get_json(silent=True) or {}
+    parent_id = data.get("parent_id")
+    department_id = data.get("department_id")
+    result = file_service.instant_upload(
+        current_user(),
+        int(parent_id) if parent_id else None,
+        int(department_id) if department_id else None,
+        data.get("file_name", ""),
+        int(data.get("file_size") or 0),
+        data.get("file_hash") or None,
+    )
+    return success(result, msg="秒传完成" if result.get("instant") else "未命中秒传")
+
+
+@bp.post("/file/chunk/init")
+@login_required
+def chunk_init():
+    """初始化/恢复分片上传会话。"""
+    data = request.get_json(silent=True) or {}
+    raw_chunk = data.get("chunk_size")
+    result = file_service.chunk_init(
+        current_user(),
+        int(data["parent_id"]) if data.get("parent_id") else None,
+        int(data["department_id"]) if data.get("department_id") else None,
+        data.get("file_name", ""),
+        int(data.get("file_size") or 0),
+        data.get("file_hash") or None,
+        int(raw_chunk) if raw_chunk else None,
+    )
+    return success(result)
+
+
+@bp.post("/file/chunk/upload")
+@login_required
+def chunk_upload():
+    """上传单个分片（幂等：重复序号覆盖）。"""
+    part = request.files.get("chunk")
+    if part is None:
+        raise ApiError("缺少分片数据", code=3201)
+    upload_id = request.form.get("upload_id")
+    if not upload_id:
+        raise ApiError("缺少 upload_id", code=3207)
+    index_raw = request.form.get("index")
+    if index_raw is None:
+        raise ApiError("缺少分片序号", code=3208)
+    result = file_service.chunk_upload(
+        current_user(),
+        upload_id,
+        int(index_raw),
+        request.form.get("chunk_hash") or None,
+        part,
+    )
+    return success(result)
+
+
+@bp.post("/file/chunk/complete")
+@login_required
+def chunk_complete():
+    """合并全部分片并完成上传。"""
+    data = request.get_json(silent=True) or {}
+    upload_id = data.get("upload_id")
+    if not upload_id:
+        raise ApiError("缺少 upload_id", code=3207)
+    return success(file_service.chunk_complete(current_user(), upload_id))
+
+
+@bp.post("/file/chunk/abort")
+@login_required
+def chunk_abort():
+    """取消分片上传并清理暂存。"""
+    data = request.get_json(silent=True) or {}
+    upload_id = data.get("upload_id")
+    if not upload_id:
+        raise ApiError("缺少 upload_id", code=3207)
+    return success(file_service.chunk_abort(current_user(), upload_id))
+
+
+@bp.get("/file/chunk/status")
+@login_required
+def chunk_status():
+    """查询分片会话已收分片（断点恢复）。"""
+    upload_id = request.args.get("upload_id")
+    if not upload_id:
+        raise ApiError("缺少 upload_id", code=3207)
+    return success(file_service.chunk_status(current_user(), upload_id))
+
+
+# ---- 1.2.0 部门文件排他编辑锁 ----
+
+@bp.post("/file/lock/acquire")
+@login_required
+def lock_acquire():
+    """打开部门文件编辑前获取排他锁（幂等，重复获取即续约）。"""
+    from ..services import file_lock_service
+
+    data = request.get_json(silent=True) or {}
+    node_id = data.get("id")
+    if not node_id:
+        raise ApiError("缺少文件 id", code=3202)
+    return success(file_lock_service.acquire(current_user(), int(node_id)))
+
+
+@bp.post("/file/lock/heartbeat")
+@login_required
+def lock_heartbeat():
+    """编辑期间定期续约，防止锁过期。"""
+    from ..services import file_lock_service
+
+    data = request.get_json(silent=True) or {}
+    node_id = data.get("id")
+    if not node_id:
+        raise ApiError("缺少文件 id", code=3202)
+    return success(file_lock_service.renew(current_user(), int(node_id)))
+
+
+@bp.post("/file/lock/release")
+@login_required
+def lock_release():
+    """保存完成/关闭文件后释放锁；管理员可 force 释放他人锁。"""
+    from ..services import file_lock_service
+
+    data = request.get_json(silent=True) or {}
+    node_id = data.get("id")
+    if not node_id:
+        raise ApiError("缺少文件 id", code=3202)
+    return success(
+        file_lock_service.release(current_user(), int(node_id), force=bool(data.get("force")))
+    )
+
+
+@bp.get("/file/lock/status")
+@login_required
+def lock_status():
+    """查询单个文件当前锁状态。"""
+    from ..services import file_lock_service
+
+    node_id = request.args.get("id")
+    if not node_id:
+        raise ApiError("缺少文件 id", code=3202)
+    return success(file_lock_service.status(current_user(), int(node_id)))
+
+
 @bp.get("/file/list")
 @login_required
 def file_list():

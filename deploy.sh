@@ -109,6 +109,12 @@ security_hints() {
     fi
 }
 
+# ---------- 部署方式提示 ----------
+show_deploy_note() {
+    info "镜像内置 MySQL + Redis，首次启动自动完成安装（创建数据库与超管账号）。"
+    info "如需跳过安装向导并直接设置管理员，请在 .env 中配置 ZHY_ADMIN_USERNAME 与 ZHY_ADMIN_PASSWORD。"
+}
+
 # ---------- 命令 ----------
 cmd_init() {
     if [ -f "$ENV_FILE" ]; then
@@ -121,6 +127,7 @@ cmd_init() {
 cmd_up() {
     ensure_docker
     ensure_env
+    show_deploy_note
     security_hints
     info "构建镜像并启动服务..."
     "${COMPOSE[@]}" up -d --build
@@ -150,7 +157,7 @@ cmd_update() {
     "${COMPOSE[@]}" ps
     ok "更新完成。"
 }
-cmd_shell()  { ensure_docker; "${COMPOSE[@]}" exec backend bash; }
+cmd_shell()  { ensure_docker; "${COMPOSE[@]}" exec app bash; }
 
 case "${1:-up}" in
     init)    cmd_init ;;

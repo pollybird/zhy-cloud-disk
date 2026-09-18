@@ -6,13 +6,18 @@ files:
   - out/**/*
   - resources/**/*
 win:
-  target: nsis
+  target:
+    - target: portable
+      arch: [x64]
   icon: resources/icon.png
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
+  signtoolOptions: null
+  signAndEditExecutable: false
+portable:
+  artifactName: ${productName}-${version}-portable.exe
 mac:
-  target: dmg
+  target:
+    - target: zip
+      arch: [x64, arm64]
   icon: resources/icon.png
   category: public.app-category.productivity
 linux:
