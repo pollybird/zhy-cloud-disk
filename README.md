@@ -8,6 +8,7 @@
 
 - Gitee：<https://gitee.com/pollybird/zhy-cloud-disk>
 - GitHub：<https://github.com/pollybird/zhy-cloud-disk>
+- GitCode：<https://gitcode.com/pollybird/ZhyCloudDisk>
 - Docker Hub：<https://hub.docker.com/r/pollybird/zhy-cloud-disk>（`pollybird/zhy-cloud-disk:latest`）
 
 ## 技术栈
