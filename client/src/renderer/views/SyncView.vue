@@ -11,6 +11,9 @@
             <el-button size="small" @click="openFolder">
               <el-icon><FolderOpened /></el-icon>&nbsp;打开文件夹
             </el-button>
+            <el-button size="small" type="warning" plain @click="trashVisible = true">
+              <el-icon><Delete /></el-icon>&nbsp;回收站
+            </el-button>
             <el-button
               v-if="deptEnabled"
               size="small"
@@ -73,6 +76,9 @@
         <el-button link type="danger" size="small" @click="clearLogs">清空记录</el-button>
       </div>
     </el-card>
+
+    <!-- 个人回收站（1.3.0） -->
+    <trash-dialog v-model="trashVisible" scope="personal" @changed="onTrashChanged" />
   </div>
 </template>
 
@@ -80,7 +86,8 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FolderOpened, Refresh, Setting } from '@element-plus/icons-vue'
+import { FolderOpened, Refresh, Setting, Delete } from '@element-plus/icons-vue'
+import TrashDialog from '../components/TrashDialog.vue'
 
 const router = useRouter()
 
@@ -91,6 +98,7 @@ const loading = ref(false)
 const countSynced = ref(0)
 const countFailed = ref(0)
 const deptEnabled = ref(false)
+const trashVisible = ref(false)
 
 const stateText = {
   idle: '已同步',
@@ -162,6 +170,12 @@ function openFolder() {
 
 function syncNow() {
   window.zhy.syncNow()
+}
+
+// 回收站还原/清空后立即同步一次，让本地文件夹尽快与远端对齐
+function onTrashChanged() {
+  window.zhy.syncNow()
+  loadLogs()
 }
 
 async function clearLogs() {

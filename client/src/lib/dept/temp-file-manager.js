@@ -5,7 +5,9 @@
  * - 双击文件 → 下载到系统临时目录 zhyCloudDeptCache/dept-<deptId>/ → 系统默认程序打开
  * - read_write：打开前先获取后端排他编辑锁（1.2.0），抢到才以读写打开；
  *   监听临时文件保存，去抖后自动覆盖回传，回传成功后释放锁（他人随即恢复可编辑）；
- *   编辑期间定时心跳续约，退出/关闭时兜底释放
+ *   编辑期间定时心跳续约，退出/关闭时兜底释放；
+ *   心跳周期内探测编辑器是否已关闭（独占打开失败=仍在编辑；连续 2 轮未被占用
+ *   =编辑器已关闭，自动释放锁，防止「打开后关闭/空保存关闭」导致锁残留）
  * - 抢锁失败（他人编辑中）或 read_only：落盘即置为只读（Office 类程序会强制走
  *   「另存为」），管理器绝不回传
  * - 退出客户端时尽力清空缓存；启动时删除超期（默认 7 天）残留
@@ -25,6 +27,7 @@ import { uploadDeptFile } from '../api/department.js'
 const DEFAULT_DEBOUNCE_MS = 800
 const DEFAULT_TTL_MS = 7 * 24 * 3600 * 1000 // 7 天
 const DEFAULT_HEARTBEAT_MS = 30 * 1000 // 后端锁 TTL 为 120s，30s 续约一次
+const DEFAULT_CLOSE_PROBE_MISSES = 2 // 连续 N 轮探测未占用 → 判定编辑器已关闭
 const LOCK_CONFLICT_CODE = 3501
 const RO_MODE = 0o444
 const RW_MODE = 0o666
@@ -55,6 +58,8 @@ function defaultWatcherFactory(root, handler) {
  * @param {(root:string, handler:(event:string,filePath:string)=>void)=>{close:Function}} [options.watcherFactory]
  * @param {{acquire:Function,heartbeat:Function,release:Function}} [options.locker] 排他锁接口
  * @param {number} [options.heartbeatMs] 锁心跳间隔
+ * @param {number} [options.closeProbeMisses] 连续多少轮探测未占用判定编辑器已关闭
+ * @param {(filePath:string)=>Promise<{close:Function}|void>} [options.probeOpener] 关闭探测用的独占打开
  * @param {(toast:{type:string,message:string})=>void} [options.onToast]
  * @param {()=>number} [options.now]
  */
@@ -62,6 +67,7 @@ export function createTempFileManager(options = {}) {
   const cacheRoot = options.cacheRoot || path.join(os.tmpdir(), 'zhyCloudDeptCache')
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS
   const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS
+  const closeProbeMisses = options.closeProbeMisses ?? DEFAULT_CLOSE_PROBE_MISSES
   const downloader = options.downloader || ((fileId, savePath) => downloadFile(fileId, savePath))
   const opener = options.opener || ((p) => shell.openPath(p))
   const md5 = options.md5 || computeMd5
@@ -73,10 +79,11 @@ export function createTempFileManager(options = {}) {
     heartbeat: lockHeartbeat,
     release: lockRelease,
   }
+  const probeOpener = options.probeOpener || ((p) => fsp.open(p, 'r+'))
   const onToast = options.onToast || (() => {})
   const now = options.now || (() => Date.now())
 
-  /** @type {Map<string, {fileId:number,deptId:number|null,parentId:number|null,fileName:string,access:string,baseline:string,uploading:boolean,dirty:boolean,timer:NodeJS.Timeout|null,readOnly:boolean,locked:boolean,lockedBy:string|null,lockTimer:NodeJS.Timeout|null}>} */
+  /** @type {Map<string, {fileId:number,deptId:number|null,parentId:number|null,fileName:string,access:string,baseline:string,uploading:boolean,dirty:boolean,timer:NodeJS.Timeout|null,readOnly:boolean,locked:boolean,lockedBy:string|null,lockTimer:NodeJS.Timeout|null,missProbe:number}>} */
   const tracked = new Map()
   let watcher = null
 
@@ -131,6 +138,17 @@ export function createTempFileManager(options = {}) {
     stopHeartbeat(rec)
     rec.lockTimer = setInterval(async () => {
       try {
+        // 编辑器关闭探测：连续 N 轮未被占用 → 判定已关闭，释放锁
+        const inUse = await probeInUse(rec)
+        if (!inUse) {
+          rec.missProbe += 1
+          if (rec.missProbe >= closeProbeMisses) {
+            await finalizeClosed(rec)
+            return
+          }
+        } else {
+          rec.missProbe = 0
+        }
         await locker.heartbeat(rec.fileId)
       } catch (e) {
         if (e?.code === LOCK_CONFLICT_CODE) {
@@ -141,6 +159,38 @@ export function createTempFileManager(options = {}) {
       }
     }, heartbeatMs)
     rec.lockTimer.unref?.()
+  }
+
+  /**
+   * 编辑器占用探测：独占打开失败 = 仍被编辑器占用；打开成功 = 已关闭。
+   * 回传中 / 防抖中保守视为占用；文件已不存在（ENOENT）视为已关闭。
+   * 注：记事本类编辑器打开后不持续持有句柄，会提前判「已关闭」，但保存回传
+   * 前 ensureLockedForSave 会重新抢锁兜底，数据安全不受影响。
+   */
+  async function probeInUse(rec) {
+    if (rec.uploading || rec.timer) return true
+    try {
+      const fh = await probeOpener(rec.filePath)
+      if (fh && typeof fh.close === 'function') await fh.close()
+      return false
+    } catch (e) {
+      if (e?.code === 'ENOENT') return false
+      return true
+    }
+  }
+
+  /** 编辑器已关闭：停止心跳并释放锁；后续若再保存，ensureLockedForSave 会重抢。 */
+  async function finalizeClosed(rec) {
+    stopHeartbeat(rec)
+    rec.missProbe = 0
+    if (rec.locked) {
+      try {
+        await locker.release(rec.fileId)
+      } catch {
+        // 网络异常：后端 TTL 兜底
+      }
+      rec.locked = false
+    }
   }
 
   async function downgradeToReadOnly(rec, holderName) {
@@ -168,6 +218,7 @@ export function createTempFileManager(options = {}) {
     try {
       await locker.acquire(rec.fileId)
       rec.locked = true
+      rec.missProbe = 0 // 编辑器仍活跃（有保存动作），重新计数
       startHeartbeat(rec)
       return true
     } catch (e) {
@@ -308,6 +359,7 @@ export function createTempFileManager(options = {}) {
         locked,
         lockedBy,
         lockTimer: null,
+        missProbe: 0,
       }
       tracked.set(target, rec)
 

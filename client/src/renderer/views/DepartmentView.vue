@@ -93,6 +93,15 @@
                 </el-button>
                 <el-button
                   size="small"
+                  type="warning"
+                  plain
+                  :disabled="!selectedDeptId"
+                  @click="trashVisible = true"
+                >
+                  <el-icon><Delete /></el-icon>&nbsp;回收站
+                </el-button>
+                <el-button
+                  size="small"
                   :disabled="!selection.length"
                   @click="downloadRows(selection)"
                 >
@@ -159,7 +168,7 @@
               <el-table-column label="上传时间" width="160">
                 <template #default="{ row }">{{ formatTime(row.upload_time) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="230" fixed="right">
+              <el-table-column label="操作" width="290" fixed="right">
                 <template #default="{ row }">
                   <el-button
                     v-if="!row.is_folder"
@@ -168,6 +177,14 @@
                     @click.stop="openRow(row)"
                   >
                     打开
+                  </el-button>
+                  <el-button
+                    v-if="!row.is_folder"
+                    link
+                    type="primary"
+                    @click.stop="openVersions(row)"
+                  >
+                    版本
                   </el-button>
                   <el-button link type="primary" @click.stop="downloadRows([row])">
                     下载
@@ -212,6 +229,17 @@
       @moved="doMove"
     />
 
+    <!-- 部门回收站（1.3.0） -->
+    <trash-dialog
+      v-model="trashVisible"
+      scope="department"
+      :department-id="selectedDeptId"
+      @changed="reloadAll"
+    />
+
+    <!-- 历史版本（1.3.0） -->
+    <version-dialog v-model="versionVisible" :node="activeNode" @restored="loadList" />
+
     <!-- 传输进度 -->
     <el-dialog v-model="transfer.visible" :title="transferTitle" width="440px" :close-on-click-modal="false" :show-close="false">
       <el-progress :percentage="transferPercent" :status="transfer.status" />
@@ -229,6 +257,8 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DeptMoveDialog from '../components/DeptMoveDialog.vue'
 import FileIcon from '../components/FileIcon.vue'
+import TrashDialog from '../components/TrashDialog.vue'
+import VersionDialog from '../components/VersionDialog.vue'
 import { canWrite, findDeptNode, firstReadableId, permLabel, permTagType } from '../../lib/dept/dept-tree.js'
 import { collectDropEntries } from '../../lib/dept/drag-drop.js'
 import { uploadGroupsToDept } from '../../lib/dept/upload-tree.js'
@@ -265,6 +295,8 @@ const selection = ref([])
 const moveVisible = ref(false)
 const activeNode = ref({})
 const dragActive = ref(false)
+const trashVisible = ref(false)
+const versionVisible = ref(false)
 
 const parentId = computed(() =>
   folderPath.value.length ? folderPath.value[folderPath.value.length - 1].id : null
@@ -635,6 +667,10 @@ async function removeRow(row) {
 function openMove(row) {
   activeNode.value = row
   moveVisible.value = true
+}
+function openVersions(row) {
+  activeNode.value = toPlain(row)
+  versionVisible.value = true
 }
 async function doMove(targetParentId) {
   try {

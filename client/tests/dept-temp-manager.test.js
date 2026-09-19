@@ -362,4 +362,83 @@ describe('1.2.0 排他编辑锁', () => {
     expect(lockedLocker.release).toHaveBeenCalledWith(31)
     expect(blockedLocker.release).not.toHaveBeenCalled()
   })
+
+  it('编辑器关闭探测：连续未占用（打开成功）→ 自动释放锁并停止心跳', async () => {
+    // probeOpener 注入为「总能打开」→ 模拟编辑器已关闭（句柄未独占）
+    const probeOpener = vi.fn(async () => ({ close: async () => {} }))
+    const { manager, locker } = makeManager({ heartbeatMs: 25, probeOpener })
+    await manager.openForEdit(node(41))
+    expect(locker.release).not.toHaveBeenCalled()
+
+    // 25ms × 连续 2 轮未占用 → finalizeClosed（留 90ms 余量）
+    await sleep(90)
+    expect(locker.release).toHaveBeenCalledTimes(1)
+    expect(locker.release).toHaveBeenCalledWith(41)
+
+    const calls = locker.heartbeat.mock.calls.length
+    expect(calls).toBeGreaterThan(0)
+    await sleep(60)
+    expect(locker.heartbeat.mock.calls.length).toBe(calls) // 心跳已停
+  })
+
+  it('编辑器占用中（独占打开失败 EBUSY）→ 不释放锁，心跳持续续约', async () => {
+    // probeOpener 抛 EBUSY → 模拟 Office/WPS 仍持有文件
+    const busyError = Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' })
+    const probeOpener = vi.fn(async () => {
+      throw busyError
+    })
+    const { manager, locker } = makeManager({ heartbeatMs: 25, probeOpener })
+    await manager.openForEdit(node(42))
+
+    await sleep(120)
+    expect(locker.release).not.toHaveBeenCalled()
+    expect(locker.heartbeat.mock.calls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('探测判定关闭后再次保存：重新抢锁并回传成功', async () => {
+    const probeOpener = vi.fn(async () => ({ close: async () => {} }))
+    const { manager, uploader, locker } = makeManager({ heartbeatMs: 25, probeOpener })
+    const ret = await manager.openForEdit(node(43))
+
+    await sleep(90) // 探测判关闭 → release
+    expect(locker.release).toHaveBeenCalledWith(43)
+    locker.acquire.mockClear()
+
+    // 编辑器（误判场景）之后又保存：ensureLockedForSave 重抢锁 → 回传
+    await fsp.appendFile(ret.filePath, '\nlate-save')
+    watcherHandler('change', ret.filePath)
+    await sleep(90)
+    expect(locker.acquire).toHaveBeenCalledWith(43)
+    expect(uploader).toHaveBeenCalledTimes(1)
+    expect(locker.release).toHaveBeenCalledTimes(2) // 回传成功后再次释放
+  })
+
+  it('回传中 / 防抖期间探测保守视为占用（不提前释放）', async () => {
+    // 用 gate uploader 让第一次回传长时间进行中
+    let releaseUpload
+    const gated = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseUpload = () => resolve({ success: [{}] })
+        })
+    )
+    const probeOpener = vi.fn(async () => ({ close: async () => {} }))
+    const { manager, locker } = makeManager({
+      heartbeatMs: 25,
+      probeOpener,
+      uploader: gated,
+    })
+    const ret = await manager.openForEdit(node(44))
+
+    // 保存 → 进入 uploading（回传挂起）；探测应视为占用 → 不 finalize
+    await fsp.appendFile(ret.filePath, '\nsaving')
+    watcherHandler('change', ret.filePath)
+    await sleep(90)
+    expect(gated).toHaveBeenCalledTimes(1)
+    expect(locker.release).not.toHaveBeenCalled()
+
+    releaseUpload()
+    await sleep(80)
+    expect(locker.release).toHaveBeenCalledTimes(1) // 回传完成后正常释放
+  })
 })

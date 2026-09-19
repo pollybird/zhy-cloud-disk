@@ -4,7 +4,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
-ZHY_VERSION = "1.3.0"
+ZHY_VERSION = "1.3.1"
 
 # 后端根目录（backend/）
 BASE_DIR = Path(__file__).resolve().parent.parent

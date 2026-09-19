@@ -201,7 +201,9 @@ npm run build  # 生产构建，输出到 dist/
 - **安全存储**：JWT 通过系统密钥环加密保存（safeStorage / Keychain / DPAPI），401 自动刷新 token
 - **冲突策略**：保留两者（自动生成"服务器冲突"副本）或最后修改者胜出
 - **部门网盘（v1.1.0）**：按权限浏览可见部门树与文件；双击下载到临时目录调用本机程序打开，编辑保存后自动回传（读写权限），另存文件不回传；支持多选下载到本地、按钮与拖拽上传到部门目录、文件夹上传；临时缓存退出清理并按超期策略回收
-- **部门文件排他锁（v1.2.0）**：打开读写文件自动抢锁，他人持锁时只读打开并提示持有者（文件图标带锁角标），保存回传后释放；心跳续约、崩溃 TTL 回收
+- **部门文件排他锁（v1.2.0）**：打开读写文件自动抢锁，他人持锁时只读打开并提示持有者（文件图标带锁角标），保存回传后释放；心跳续约、崩溃 TTL 回收；编辑器关闭后约 1~1.5 分钟自动探测释放，避免锁残留（v1.3.1）
+- **回收站（v1.3.1）**：首页可查看 / 还原 / 彻底删除 / 清空个人回收站，部门网盘内可对所选部门执行相同操作；显示删除人与剩余保留天数，个人盘变更后自动触发同步对齐本地文件夹
+- **文件历史版本（v1.3.1）**：部门网盘文件可查看版本列表（版本号 / 大小 / 修改人 / 保存时间）、下载任意历史版本到本地、一键恢复（当前内容自动另存为新版本，可来回切换）
 
 ### 安装依赖（国内镜像）
 
@@ -228,7 +230,7 @@ npx electron-vite build
 ### 单元测试
 
 ```bash
-npm test             # 127 个用例（vitest）
+npm test             # 131 个用例（vitest）
 npm run test:watch   # 监听模式
 ```
 
@@ -253,11 +255,12 @@ client/
 │   ├── preload/         # 安全桥（contextBridge 暴露受限 API）
 │   ├── renderer/        # Vue3 界面：配置向导、同步历史主界面、设置
 │   └── lib/
-│       ├── api/         # axios 封装（token 注入 / 401 刷新 / 文件接口）
+│       ├── api/         # axios 封装（token 注入 / 401 刷新 / 文件与回收站版本接口）
+│       ├── dept/        # 部门网盘：临时文件管理（排他锁 / 保存回传 / 关闭探测）、传输与上传树
 │       ├── mirror/      # better-sqlite3 镜像库（远端树快照 / 本地指纹 / 同步日志）
 │       ├── store/       # 设置持久化 + 加密 token
 │       └── sync/        # 同步引擎：watcher / poller / 队列 / 协调器 / 哈希
-├── tests/               # vitest 单元测试（127 用例）
+├── tests/               # vitest 单元测试（131 用例）
 └── resources/           # 应用图标
 ```
 
@@ -303,19 +306,19 @@ zhyCloudDisk/
 ├── .env.example           # 环境变量示例
 ├── backend/
 │   ├── app/
-│   │   ├── api/           # 蓝图接口（auth, file, department, permission, share, plugin, setup, user）
-│   │   ├── models/        # 数据模型（user, file_node, department, file_permission, share, ...）
-│   │   ├── services/      # 业务逻辑（auth, file, department, permission, share, setup, cache, ...）
+│   │   ├── api/           # 蓝图接口（auth, file, department, permission, share, plugin, setup, user, admin, system）
+│   │   ├── models/        # 数据模型（user, file_node, department, file_permission, share, trash_item, file_version, backup_record, ...）
+│   │   ├── services/      # 业务逻辑（auth, file, department, permission, share, setup, cache, trash, version, metrics, backup, setting, ...）
 │   │   ├── plugins/       # 插件框架（base, manager, builtin/）
-│   │   ├── tasks/         # 定时任务（过期分享清理、过期锁清理）
-│   │   └── utils/         # 工具（response, errors, security, validators, decorators）
+│   │   ├── tasks/         # 定时任务（过期分享清理、过期锁清理、回收站清理、指标采样、备份调度）
+│   │   └── utils/         # 工具（response, errors, security, validators, decorators, crypto, migrations）
 │   ├── tests/             # pytest 测试套件
 │   ├── wsgi.py            # gunicorn 生产入口
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── views/         # 页面（Files, Setup, Login, Register, Profile, ...）
-│   │   ├── components/    # 组件（PluginPreview, FileUploadDialog, ...）
+│   │   ├── views/         # 页面（Files, Setup, Login, Register, Profile, DepartmentFiles, admin/Dashboard, admin/Backup, admin/Settings, ...）
+│   │   ├── components/    # 组件（PluginPreview, FileUploadDialog, TrashDrawer, VersionDialog, ...）
 │   │   └── stores/        # Pinia 状态管理
 │   └── dist/              # 前端构建产物（构建镜像前需 npm run build）
 ├── client/                # Electron 桌面同步客户端

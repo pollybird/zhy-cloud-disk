@@ -210,3 +210,69 @@ export async function lockStatus(id) {
   const res = await http.get('/api/file/lock/status', { params: { id } })
   return res.data
 }
+
+/**
+ * 1.3.0 回收站：列表。
+ * GET /api/file/trash?scope=personal|department&department_id=
+ */
+export async function listTrash({ scope = 'personal', departmentId = null } = {}) {
+  const res = await http.get('/api/file/trash', {
+    params: {
+      scope,
+      ...(scope === 'department' ? { department_id: departmentId } : {}),
+    },
+  })
+  return res.data
+}
+
+/** 还原回收站单项。POST /api/file/trash/restore body: { id } */
+export async function restoreTrashItem(id) {
+  const res = await http.post('/api/file/trash/restore', { id })
+  return res.data
+}
+
+/** 彻底删除回收站单项（含历史版本与存储实体）。DELETE /api/file/trash/item body: { id } */
+export async function purgeTrashItem(id) {
+  const res = await http.delete('/api/file/trash/item', { data: { id } })
+  return res.data
+}
+
+/** 清空回收站。DELETE /api/file/trash?scope=&department_id= */
+export async function emptyTrash({ scope = 'personal', departmentId = null } = {}) {
+  const res = await http.delete('/api/file/trash', {
+    params: {
+      scope,
+      ...(scope === 'department' ? { department_id: departmentId } : {}),
+    },
+  })
+  return res.data
+}
+
+/**
+ * 1.3.0 历史版本：列表（含当前版本信息）。
+ * GET /api/file/versions/<node_id>
+ * @returns {Promise<{current:{file_hash,file_size,upload_time}, items:Array}>}
+ */
+export async function listVersions(nodeId) {
+  const res = await http.get(`/api/file/versions/${nodeId}`)
+  return res.data
+}
+
+/** 下载指定历史版本到本地路径（流式写入）。GET /api/file/version/download?version_id= */
+export async function downloadVersion(versionId, savePath) {
+  const tmpPath = savePath + '.zhy.part'
+  const res = await http.get('/api/file/version/download', {
+    params: { version_id: versionId },
+    responseType: 'stream',
+  })
+  const writer = fs.createWriteStream(tmpPath)
+  await pipeline(res.data, writer)
+  await fs.promises.rename(tmpPath, savePath)
+  return savePath
+}
+
+/** 恢复指定历史版本（当前内容转为新版本，可来回切换）。POST /api/file/version/restore body: { version_id } */
+export async function restoreVersion(versionId) {
+  const res = await http.post('/api/file/version/restore', { version_id: versionId })
+  return res.data
+}

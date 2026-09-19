@@ -70,6 +70,20 @@ const api = {
       invoke('dept:upload', { plans, departmentId, parentId, overwrite }),
   },
 
+  // 回收站与历史版本（1.3.0，个人/部门复用）
+  trash: {
+    list: (params) => invoke('trash:list', params),
+    restore: (id) => invoke('trash:restore', { id }),
+    purge: (id) => invoke('trash:purge', { id }),
+    empty: (params) => invoke('trash:empty', params),
+  },
+  versions: {
+    list: (nodeId) => invoke('versions:list', { nodeId }),
+    restore: (versionId) => invoke('versions:restore', { versionId }),
+    download: (versionId, fileName) =>
+      invoke('versions:download', { versionId, fileName }),
+  },
+
   // Electron 32+ 拖入文件真实路径必须经 webUtils 获取
   getPathForFile: (file) => webUtils.getPathForFile(file),
 
