@@ -9,6 +9,9 @@ export const useAppStore = defineStore('app', {
     statusLoaded: false,
     // 1.1.0 功能开关：null=未加载，true/false=已加载
     departmentDrive: null,
+    // 1.3.0 回收站 / 历史版本开关
+    trashEnabled: null,
+    versionEnabled: null,
   }),
   actions: {
     async fetchStatus() {
@@ -26,8 +29,12 @@ export const useAppStore = defineStore('app', {
       try {
         const res = await getFeatureFlags()
         this.departmentDrive = !!res.data.department_drive
+        this.trashEnabled = res.data.trash_enabled !== false
+        this.versionEnabled = res.data.version_enabled !== false
       } catch (e) {
         this.departmentDrive = false
+        this.trashEnabled = true
+        this.versionEnabled = true
       }
       return this.departmentDrive
     },

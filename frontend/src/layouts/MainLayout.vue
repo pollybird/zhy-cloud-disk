@@ -43,14 +43,32 @@
             <span>操作日志</span>
           </el-menu-item>
         </template>
-        <el-menu-item v-if="userStore.isAdmin" index="/admin/users">
-          <el-icon><Setting /></el-icon>
-          <span>用户管理</span>
-        </el-menu-item>
-        <el-menu-item v-if="userStore.isAdmin" index="/admin/plugins">
-          <el-icon><Cpu /></el-icon>
-          <span>插件管理</span>
-        </el-menu-item>
+        <el-sub-menu v-if="userStore.isAdmin" index="admin-group">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>系统管理</span>
+          </template>
+          <el-menu-item index="/admin/dashboard">
+            <el-icon><Monitor /></el-icon>
+            <span>监控仪表盘</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/backup">
+            <el-icon><FolderOpened /></el-icon>
+            <span>备份恢复</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/users">
+            <el-icon><UserFilled /></el-icon>
+            <span>用户管理</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/plugins">
+            <el-icon><Cpu /></el-icon>
+            <span>插件管理</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/settings">
+            <el-icon><Tools /></el-icon>
+            <span>系统设置</span>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
 

@@ -4,7 +4,15 @@
 本身具备幂等兜底能力，多个执行体同时运行也不会出错。
 """
 from ..extensions import scheduler
-from . import blob_adopt, lock_cleanup, share_cleanup, upload_cleanup
+from . import (
+    backup_schedule,
+    blob_adopt,
+    lock_cleanup,
+    metrics_sampler,
+    share_cleanup,
+    trash_cleanup,
+    upload_cleanup,
+)
 
 _JOB_ID = "share-cleanup"
 _TRIGGER_INTERVAL_MINUTES = 10
@@ -17,6 +25,15 @@ _ADOPT_INTERVAL_HOURS = 24
 
 _LOCK_JOB_ID = "lock-cleanup"
 _LOCK_INTERVAL_MINUTES = 5
+
+_TRASH_JOB_ID = "trash-cleanup"
+_TRASH_INTERVAL_HOURS = 1
+
+_METRICS_JOB_ID = "metrics-sampler"
+_METRICS_INTERVAL_SECONDS = 15
+
+_BACKUP_JOB_ID = "backup-schedule"
+_BACKUP_MINUTE = 17
 
 
 def start_scheduler(app) -> None:
@@ -60,6 +77,40 @@ def start_scheduler(app) -> None:
             trigger="interval",
             minutes=_LOCK_INTERVAL_MINUTES,
             id=_LOCK_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+    if scheduler.get_job(_TRASH_JOB_ID) is None:
+        scheduler.add_job(
+            func=lambda: _run_with_context(app, trash_cleanup.run),
+            trigger="interval",
+            hours=_TRASH_INTERVAL_HOURS,
+            id=_TRASH_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+    if scheduler.get_job(_METRICS_JOB_ID) is None:
+        scheduler.add_job(
+            func=lambda: _run_with_context(app, metrics_sampler.run),
+            trigger="interval",
+            seconds=_METRICS_INTERVAL_SECONDS,
+            id=_METRICS_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+    if scheduler.get_job(_BACKUP_JOB_ID) is None:
+        from apscheduler.triggers.cron import CronTrigger
+
+        scheduler.add_job(
+            func=lambda: _run_with_context(app, backup_schedule.run),
+            trigger=CronTrigger(minute=_BACKUP_MINUTE),
+            id=_BACKUP_JOB_ID,
             replace_existing=True,
             max_instances=1,
             coalesce=True,

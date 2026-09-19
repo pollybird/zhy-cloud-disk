@@ -16,6 +16,7 @@ class FileNode(db.Model):
         ),
         db.Index("ix_file_user_status", "user_id", "status"),
         db.Index("ix_file_user_suffix", "user_id", "file_suffix"),
+        db.Index("ix_file_deleted_time", "deleted_time"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -38,6 +39,8 @@ class FileNode(db.Model):
     )
     upload_time = db.Column(db.DateTime, nullable=False, default=_utcnow)
     status = db.Column(db.String(16), nullable=False, default="normal")  # normal/deleted
+    deleted_time = db.Column(db.DateTime, nullable=True)  # 1.3.0 回收站：软删时间
+    delete_operator_id = db.Column(db.Integer, nullable=True)  # 删除操作人
 
     parent = db.relationship(
         "FileNode", remote_side=[id], backref=db.backref("children", lazy="dynamic")

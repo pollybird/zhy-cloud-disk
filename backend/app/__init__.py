@@ -61,10 +61,15 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         _import_models()
         with app.app_context():
             db.create_all()
-            from .utils.migrations import ensure_file_hash_column, ensure_department_columns
+            from .utils.migrations import (
+                ensure_department_columns,
+                ensure_file_hash_column,
+                ensure_v130_columns,
+            )
 
             ensure_file_hash_column()
             ensure_department_columns()
+            ensure_v130_columns()
         _start_scheduler(app)
         _init_plugins(app)
 
@@ -78,6 +83,10 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         except Exception:
             app.logger.exception("读取部门功能开关失败，默认关闭")
             app.config["DEPARTMENT_DRIVE_ENABLED"] = False
+
+    # 监控钩子无状态：未安装时无登录用户、业务请求被安装守卫拦截，自然空转，
+    # 故无条件注册（兼容先建应用后执行安装向导的流程）。
+    _register_metrics_hooks(app)
 
     # 注册蓝图
     from .api import register_blueprints
@@ -104,19 +113,62 @@ def _register_install_guard(app: Flask) -> None:
         raise ApiError("系统尚未安装，请先完成安装向导", code=4001, http_status=503)
 
 
+def _register_metrics_hooks(app: Flask) -> None:
+    """监控统计钩子：活跃用户心跳（60s 节流）与上传/下载流量累计。
+
+    统计失败不得影响正常请求。
+    """
+    from flask import g, request
+
+    _UPLOAD_PATHS = {"/api/file/upload", "/api/file/chunk/upload"}
+    _DOWNLOAD_PATHS = {
+        "/api/file/download",
+        "/api/file/version/download",
+        "/api/share/download",
+    }
+
+    @app.after_request
+    def _collect_metrics(response):
+        try:
+            from .services import metrics_service
+
+            user = getattr(g, "current_user", None)
+            if user is not None:
+                metrics_service.touch_active(user)
+
+            if response.status_code == 200:
+                if request.method == "POST" and request.path in _UPLOAD_PATHS:
+                    length = request.content_length or 0
+                    if length > 0:
+                        metrics_service.record_traffic(up=length)
+                elif request.method == "GET" and request.path in _DOWNLOAD_PATHS:
+                    try:
+                        length = int(response.headers.get("Content-Length") or 0)
+                    except ValueError:
+                        length = 0
+                    if length > 0:
+                        metrics_service.record_traffic(down=length)
+        except Exception:
+            app.logger.debug("监控指标采集失败", exc_info=True)
+        return response
+
+
 def _import_models() -> None:
     """导入全部模型以注册表到 SQLAlchemy 元数据。"""
     from .models import (  # noqa: F401
+        backup_record,
         department,
         download_log,
         file_blob,
         file_lock,
         file_node,
         file_permission,
+        file_version,
         operation_log,
         plugin,
         share,
         system_setting,
+        trash_item,
         upload_session,
         user,
     )

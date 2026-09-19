@@ -26,6 +26,9 @@
           <el-icon><FolderAdd /></el-icon>&nbsp;新建文件夹
         </el-button>
         <file-upload :parent-id="category === 'all' ? parentId : null" @uploaded="loadAll" />
+        <el-button circle @click="trashVisible = true" title="回收站">
+          <el-icon><Delete /></el-icon>
+        </el-button>
         <el-button circle @click="loadAll">
           <el-icon><Refresh /></el-icon>
         </el-button>
@@ -87,7 +90,7 @@
       <el-table-column label="上传时间" width="170">
         <template #default="{ row }">{{ formatDateTime(row.upload_time) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="380" fixed="right">
+      <el-table-column label="操作" width="450" fixed="right">
         <template #default="{ row }">
           <el-button
             v-if="!row.is_folder"
@@ -115,6 +118,14 @@
           </el-button>
           <el-button link type="warning" @click="rename(row)">重命名</el-button>
           <el-button link type="primary" @click="openMove(row)">移动</el-button>
+          <el-button
+            v-if="!row.is_folder && appStore.versionEnabled"
+            link
+            type="info"
+            @click="openVersions(row)"
+          >
+            历史版本
+          </el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -131,6 +142,9 @@
 
     <move-dialog v-model="moveVisible" :node="activeNode" @moved="loadAll" />
     <share-dialog v-model="shareVisible" :file="activeNode" />
+
+    <trash-drawer v-model="trashVisible" @changed="loadAll" />
+    <version-dialog v-model="versionVisible" :node="activeNode" @restored="loadAll" />
 
     <!-- 插件预览弹窗 -->
     <el-dialog
@@ -152,6 +166,8 @@ import FileUpload from '../../components/FileUpload.vue'
 import MoveDialog from '../../components/MoveDialog.vue'
 import PluginPreview from '../../components/PluginPreview.vue'
 import ShareDialog from '../../components/ShareDialog.vue'
+import TrashDrawer from '../../components/TrashDrawer.vue'
+import VersionDialog from '../../components/VersionDialog.vue'
 import {
   createFolder as apiCreateFolder,
   deleteFile,
@@ -159,11 +175,13 @@ import {
   listFiles,
   renameFile,
 } from '../../api/file'
+import { useAppStore } from '../../stores/app'
 import { useUserStore } from '../../stores/user'
 import { formatDateTime, formatSize } from '../../utils/format'
 import FileIcon from '../../components/FileIcon.vue'
 
 const userStore = useUserStore()
+const appStore = useAppStore()
 const user = computed(() => userStore.user || {})
 
 const parentId = ref(null)
@@ -178,6 +196,8 @@ const breadcrumb = ref([])
 const moveVisible = ref(false)
 const shareVisible = ref(false)
 const previewVisible = ref(false)
+const trashVisible = ref(false)
+const versionVisible = ref(false)
 const activeNode = ref({})
 
 const categoryLabels = {
@@ -285,13 +305,20 @@ function openPreview(row) {
   previewVisible.value = true
 }
 
+function openVersions(row) {
+  activeNode.value = row
+  versionVisible.value = true
+}
+
 async function remove(row) {
-  const tip = row.is_folder
-    ? `文件夹「${row.file_name}」及其内全部内容将被删除，且不可恢复`
-    : `文件「${row.file_name}」将被删除，且不可恢复`
+  const target = row.is_folder ? '文件夹及其内全部内容' : '文件'
+  const tip = appStore.trashEnabled
+    ? `「${row.file_name}」将被移入回收站，可在回收站中还原，到期后自动彻底删除`
+    : `${target}「${row.file_name}」将被彻底删除，且不可恢复`
+  const confirmText = appStore.trashEnabled ? '移入回收站' : '删除'
   await ElMessageBox.confirm(tip, '删除确认', {
     type: 'warning',
-    confirmButtonText: '删除',
+    confirmButtonText: confirmText,
     cancelButtonText: '取消',
   })
   await deleteFile(row.id)
@@ -320,7 +347,12 @@ async function download(row) {
   URL.revokeObjectURL(url)
 }
 
-onMounted(loadAll)
+onMounted(async () => {
+  if (appStore.trashEnabled === null) {
+    await appStore.fetchFeatureFlags().catch(() => {})
+  }
+  loadAll()
+})
 </script>
 
 <style scoped>

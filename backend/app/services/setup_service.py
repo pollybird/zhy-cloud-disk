@@ -314,14 +314,20 @@ def _do_install(app, payload: dict) -> dict:
         _switch_engine(app, uri)
         # 确保模型已注册
         from ..models import (  # noqa: F401
+            backup_record,
             department,
             download_log,
+            file_blob,
+            file_lock,
             file_node,
             file_permission,
+            file_version,
             operation_log,
             plugin,
             share,
             system_setting,
+            trash_item,
+            upload_session,
             user,
         )
 

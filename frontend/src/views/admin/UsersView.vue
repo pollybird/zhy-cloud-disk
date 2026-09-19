@@ -4,15 +4,6 @@
       <div class="card-header">
         <span>用户管理</span>
         <div class="tools">
-          <span class="reg-label">公开注册</span>
-          <el-switch
-            v-model="allowRegister"
-            :loading="settingLoading"
-            inline-prompt
-            active-text="开"
-            inactive-text="关"
-            @change="onToggleRegister"
-          />
           <el-button type="primary" @click="openCreate">
             <el-icon><Plus /></el-icon>&nbsp;添加用户
           </el-button>
@@ -28,16 +19,6 @@
         </div>
       </div>
     </template>
-
-    <el-alert
-        class="reg-tip"
-        :type="allowRegister ? 'success' : 'info'"
-        :closable="false"
-        show-icon
-        :title="allowRegister
-          ? '当前允许游客自行注册，新注册用户为普通角色并使用系统默认配额'
-          : '当前已关闭公开注册，新账号只能由管理员在后台添加'"
-      />
 
     <el-table :data="rows" v-loading="loading" border stripe style="margin-top: 12px">
       <el-table-column prop="id" label="ID" width="70" />
@@ -176,10 +157,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createUser,
-  getAdminSettings,
   listUsers,
   setUserStatus,
-  updateAdminSettings,
   updateUser,
 } from '../../api/user'
 import { useUserStore } from '../../stores/user'
@@ -196,9 +175,6 @@ const page = ref(1)
 const size = ref(20)
 const keyword = ref('')
 const loading = ref(false)
-
-const allowRegister = ref(false)
-const settingLoading = ref(false)
 
 const dialogVisible = ref(false)
 const dialogMode = ref('create') // create | edit
@@ -278,16 +254,6 @@ async function loadData() {
   }
 }
 
-async function loadSettings() {
-  settingLoading.value = true
-  try {
-    const res = await getAdminSettings()
-    allowRegister.value = res.data.allow_register
-  } finally {
-    settingLoading.value = false
-  }
-}
-
 function reloadFirst() {
   page.value = 1
   loadData()
@@ -296,19 +262,6 @@ function reloadFirst() {
 function onPageChange(p) {
   page.value = p
   loadData()
-}
-
-async function onToggleRegister(val) {
-  settingLoading.value = true
-  try {
-    await updateAdminSettings({ allow_register: val })
-    ElMessage.success(val ? '已开放公开注册' : '已关闭公开注册')
-  } catch (e) {
-    // 失败回滚开关状态
-    allowRegister.value = !val
-  } finally {
-    settingLoading.value = false
-  }
 }
 
 function openCreate() {
@@ -386,7 +339,6 @@ async function toggleStatus(row, status) {
 }
 
 onMounted(() => {
-  loadSettings()
   loadData()
 })
 </script>
@@ -402,15 +354,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.reg-label {
-  font-size: 13px;
-  color: #475569;
-}
-
-.reg-tip {
-  margin: 0;
 }
 
 .pager {

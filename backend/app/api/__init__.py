@@ -36,6 +36,7 @@ def register_department_blueprints(app) -> None:
 
 def register_blueprints(app) -> None:
     # 基础蓝图（始终注册）
+    from .admin import bp as admin_bp
     from .auth import bp as auth_bp
     from .file import bp as file_bp
     from .plugin import bp as plugin_bp
@@ -47,6 +48,7 @@ def register_blueprints(app) -> None:
     app.register_blueprint(setup_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(user_bp)
+    app.register_blueprint(admin_bp)
     app.register_blueprint(file_bp)
     app.register_blueprint(share_bp)
     app.register_blueprint(plugin_bp)

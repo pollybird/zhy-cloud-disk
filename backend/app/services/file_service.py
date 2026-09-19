@@ -19,7 +19,10 @@ from ..utils.errors import ApiError
 from . import blob_service
 from . import log_service
 from . import permission_service
+from . import setting_service
 from . import storage_service
+from . import trash_service
+from . import version_service
 
 NAME_MAX = 255
 
@@ -529,8 +532,20 @@ def _do_overwrite(
 
         blob = blob_service.get_or_create(server_hash, file_size, staged_path)
         blob_service.retain(blob)
-        # 释放旧版本引用；新旧内容相同（同 hash）时净计数不变、物理文件保留
-        old_kind, old_release_path = blob_service.release_for_hash(old_hash, old_save_path)
+
+        # 旧内容处理：版本开关开启且内容变化 → 归档为历史版本（引用转移，
+        # 计数不变）；否则沿用 v1.2.0 逻辑立即释放旧引用。
+        version_to_unlink: list[str] = []
+        old_kind, old_release_path = ("alive", None)
+        content_changed = bool(old_save_path) and server_hash != old_hash
+        if setting_service.is_version_enabled() and content_changed:
+            version_service.archive_version(existing, user.id)
+            version_to_unlink = version_service.prune_versions(existing.id)
+        else:
+            # 新旧内容相同（同 hash）时净计数不变、物理文件保留
+            old_kind, old_release_path = blob_service.release_for_hash(
+                old_hash, old_save_path
+            )
 
         existing.save_path = blob.save_path
         existing.file_suffix = suffix
@@ -540,6 +555,8 @@ def _do_overwrite(
         db.session.commit()
         db.session.refresh(user)
 
+        for path in version_to_unlink:
+            storage_service.remove_physical(path)
         if old_kind == "removed" and old_release_path:
             storage_service.remove_physical(old_release_path)
         elif old_kind == "legacy" and old_save_path:
@@ -945,57 +962,13 @@ def move_node(user: User, node_id: int, target_parent_id: int | None) -> FileNod
 
 
 def delete_node(user: User, node_id: int) -> None:
+    """删除节点：回收站开启时软删（可恢复），关闭时立即彻底删除。"""
     node = get_owned_node(user, node_id, required="delete")
-
-    ids = _subtree_ids(node)
-    file_nodes = (
-        db.session.query(FileNode)
-        .filter(FileNode.id.in_(ids), FileNode.is_folder.is_(False))
-        .all()
-    )
-    # 删除文件夹：子树内任意文件正被编辑锁定则整体拒绝
-    if node.is_folder and node.department_id:
-        from . import file_lock_service
-
-        file_lock_service.assert_no_lock_in_tree([f.id for f in file_nodes])
-    # 先释放 blob 引用（事务内）：ref_count 归零的物理路径待提交后删除；
-    # 1.0/1.1 legacy 物理文件不在 blob 目录，沿用直接删除
-    to_unlink: list[str] = []
-    for f in file_nodes:
-        kind, released_path = blob_service.release_for_hash(f.file_hash, f.save_path)
-        if kind == "removed" and released_path:
-            to_unlink.append(released_path)
-        elif kind == "legacy" and f.save_path:
-            to_unlink.append(f.save_path)
-    freed_space = sum(f.file_size for f in file_nodes)
-
-    db.session.query(FileNode).filter(FileNode.id.in_(ids)).update(
-        {FileNode.status: "deleted"}, synchronize_session=False
-    )
-    # 释放配额：部门文件退部门配额，个人文件退用户配额
-    if node.department_id:
-        locked = db.session.query(Department).filter(
-            Department.id == node.department_id
-        ).with_for_update().first()
-        if locked is not None and freed_space:
-            locked.used_storage = max(locked.used_storage - freed_space, 0)
+    if setting_service.is_trash_enabled():
+        trash_service.soft_delete(user, node)
     else:
-        locked_user = db.session.query(User).filter(
-            User.id == user.id
-        ).with_for_update().first()
-        if locked_user is not None and freed_space:
-            locked_user.used_storage = max(locked_user.used_storage - freed_space, 0)
-    db.session.commit()
-
-    for path in to_unlink:
-        storage_service.remove_physical(path)
+        trash_service.hard_delete(node, actor_id=user.id)
     db.session.refresh(user)
-
-    if node.department_id:
-        _log_dept_file_op(
-            user, "file_delete", node,
-            {"freed": freed_space, "deleted_count": len(ids)},
-        )
 
 
 def _log_dept_file_op(

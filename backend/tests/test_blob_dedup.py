@@ -145,13 +145,23 @@ def test_delete_shared_blob_keeps_other_copy(app, client, user_headers, user2_he
     id2 = instant(client, user2_headers, f"{tag}_b.txt", content).get_json()["data"]["node"]["id"]
 
     client.delete(f"/api/file/delete", json={"id": id1}, headers=user_headers)
-    # user2 的副本仍可下载，blob 仍在，计数为 1
+    # 1.3.0 回收站：软删不释放 blob，计数保持 2；user2 的副本仍可下载
     assert client.get(f"/api/file/download?id={id2}", headers=user2_headers).data == content
+    with app.app_context():
+        blob = db.session.query(FileBlob).filter_by(file_hash=h).first()
+        assert blob is not None and blob.ref_count == 2
+
+    # user1 清空回收站 → id1 引用释放，仅剩 user2 的正常副本
+    client.delete("/api/file/trash?scope=personal", headers=user_headers)
     with app.app_context():
         blob = db.session.query(FileBlob).filter_by(file_hash=h).first()
         assert blob is not None and blob.ref_count == 1
 
+    # user2 软删后仍计数 1；清空回收站后归零，物理文件删除
     client.delete(f"/api/file/delete", json={"id": id2}, headers=user2_headers)
+    with app.app_context():
+        assert db.session.query(FileBlob).filter_by(file_hash=h).first().ref_count == 1
+    client.delete("/api/file/trash?scope=personal", headers=user2_headers)
     with app.app_context():
         assert db.session.query(FileBlob).filter_by(file_hash=h).first() is None
     assert not [p for p in blob_files(app) if p.name == h]

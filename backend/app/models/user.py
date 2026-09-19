@@ -23,6 +23,7 @@ class User(db.Model):
     used_storage = db.Column(db.BigInteger, nullable=False, default=0)
     create_time = db.Column(db.DateTime, nullable=False, default=utcnow)
     status = db.Column(db.String(16), nullable=False, default="active")  # active/disabled
+    last_active_time = db.Column(db.DateTime, nullable=True, index=True)  # 1.3.0 在线统计
 
     def to_dict(self) -> dict:
         return {

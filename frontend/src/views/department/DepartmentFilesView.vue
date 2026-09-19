@@ -88,6 +88,14 @@
                 :parent-id="category === 'all' ? parentId : null"
                 @uploaded="onUploaded"
               />
+              <el-button
+                v-if="canWrite(containerAccess)"
+                circle
+                title="部门回收站"
+                @click="trashVisible = true"
+              >
+                <el-icon><Delete /></el-icon>
+              </el-button>
               <el-button circle @click="loadList">
                 <el-icon><Refresh /></el-icon>
               </el-button>
@@ -168,7 +176,7 @@
             <el-table-column label="上传时间" width="170">
               <template #default="{ row }">{{ formatDateTime(row.upload_time) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="300" fixed="right">
+            <el-table-column label="操作" width="370" fixed="right">
               <template #default="{ row }">
                 <el-button
                   v-if="!row.is_folder"
@@ -189,6 +197,14 @@
                 <template v-if="canWrite(row.access)">
                   <el-button link type="warning" @click="rename(row)">重命名</el-button>
                   <el-button link type="primary" @click="openMove(row)">移动</el-button>
+                  <el-button
+                    v-if="!row.is_folder && appStore.versionEnabled"
+                    link
+                    type="info"
+                    @click="openVersions(row)"
+                  >
+                    历史版本
+                  </el-button>
                   <el-button link type="danger" @click="remove(row)">删除</el-button>
                 </template>
               </template>
@@ -210,6 +226,14 @@
             :department-id="selectedDeptId"
             @moved="loadList"
           />
+
+          <trash-drawer
+            v-model="trashVisible"
+            scope="department"
+            :department-id="selectedDeptId"
+            @changed="onTrashChanged"
+          />
+          <version-dialog v-model="versionVisible" :node="activeNode" @restored="loadList" />
 
           <!-- 插件预览弹窗 -->
           <el-dialog
@@ -236,6 +260,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import FileUpload from '../../components/FileUpload.vue'
 import MoveDialog from '../../components/MoveDialog.vue'
 import PluginPreview from '../../components/PluginPreview.vue'
+import TrashDrawer from '../../components/TrashDrawer.vue'
+import VersionDialog from '../../components/VersionDialog.vue'
 import { getDepartmentTree } from '../../api/department'
 import {
   createFolder as apiCreateFolder,
@@ -244,10 +270,12 @@ import {
   listFiles,
   renameFile,
 } from '../../api/file'
+import { useAppStore } from '../../stores/app'
 import { formatDateTime, formatSize } from '../../utils/format'
 import FileIcon from '../../components/FileIcon.vue'
 import { canWrite, findDeptNode } from '../../utils/deptTree'
 
+const appStore = useAppStore()
 const route = useRoute()
 const treeProps = { label: 'name', children: 'children' }
 
@@ -269,6 +297,8 @@ const breadcrumb = ref([])
 const containerAccess = ref('none')
 const moveVisible = ref(false)
 const previewVisible = ref(false)
+const trashVisible = ref(false)
+const versionVisible = ref(false)
 const activeNode = ref({})
 
 const selectedDept = computed(() => findDeptNode(deptTree.value, selectedDeptId.value))
@@ -462,19 +492,31 @@ function openPreview(row) {
   previewVisible.value = true
 }
 
+function openVersions(row) {
+  activeNode.value = row
+  versionVisible.value = true
+}
+
 async function remove(row) {
-  const tip = row.is_folder
-    ? `文件夹「${row.file_name}」及其内全部内容将被删除，且不可恢复`
-    : `文件「${row.file_name}」将被删除，且不可恢复`
+  const target = row.is_folder ? '文件夹及其内全部内容' : '文件'
+  const tip = appStore.trashEnabled
+    ? `「${row.file_name}」将被移入部门回收站，可在回收站中还原，到期后自动彻底删除`
+    : `${target}「${row.file_name}」将被彻底删除，且不可恢复`
+  const confirmText = appStore.trashEnabled ? '移入回收站' : '删除'
   await ElMessageBox.confirm(tip, '删除确认', {
     type: 'warning',
-    confirmButtonText: '删除',
+    confirmButtonText: confirmText,
     cancelButtonText: '取消',
   })
   await deleteFile(row.id)
   ElMessage.success('删除成功')
   await loadList()
   // 释放部门配额后刷新树节点上的空间数据
+  loadDeptTree(false)
+}
+
+function onTrashChanged() {
+  loadList()
   loadDeptTree(false)
 }
 
@@ -504,7 +546,12 @@ async function download(row) {
   URL.revokeObjectURL(url)
 }
 
-onMounted(() => loadDeptTree(true))
+onMounted(async () => {
+  if (appStore.trashEnabled === null) {
+    await appStore.fetchFeatureFlags().catch(() => {})
+  }
+  loadDeptTree(true)
+})
 </script>
 
 <style scoped>

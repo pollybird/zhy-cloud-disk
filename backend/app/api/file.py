@@ -317,3 +317,111 @@ def delete():
     file_id = int(data.get("id") or request.args.get("id") or 0)
     file_service.delete_node(current_user(), file_id)
     return success(msg="删除成功")
+
+
+# ==================== 1.3.0 回收站 ====================
+
+@bp.get("/file/trash")
+@login_required
+def trash_list():
+    scope = request.args.get("scope", "personal")
+    dept_raw = request.args.get("department_id")
+    department_id = int(dept_raw) if dept_raw else None
+    from ..services import trash_service
+
+    return success({"items": trash_service.list_trash(
+        current_user(), scope, department_id
+    )})
+
+
+@bp.post("/file/trash/restore")
+@login_required
+def trash_restore():
+    data = request.get_json(silent=True) or {}
+    from ..services import trash_service
+
+    node = trash_service.restore(current_user(), int(data.get("id") or 0))
+    return success(node.to_dict(), msg="还原成功")
+
+
+@bp.delete("/file/trash/item")
+@login_required
+def trash_purge_one():
+    data = request.get_json(silent=True) or {}
+    trash_id = int(data.get("id") or request.args.get("id") or 0)
+    from ..services import trash_service
+
+    trash_service.purge_item(current_user(), trash_id)
+    return success(msg="已彻底删除")
+
+
+@bp.delete("/file/trash")
+@login_required
+def trash_empty():
+    scope = request.args.get("scope", "personal")
+    dept_raw = request.args.get("department_id")
+    department_id = int(dept_raw) if dept_raw else None
+    from ..services import trash_service
+
+    count = trash_service.empty_trash(current_user(), scope, department_id)
+    return success({"count": count}, msg=f"已清空 {count} 项")
+
+
+# ==================== 1.3.0 历史版本 ====================
+
+@bp.get("/file/versions/<int:node_id>")
+@login_required
+def version_list(node_id):
+    from ..services import version_service
+
+    node = file_service.get_owned_node(current_user(), node_id, required="read")
+    return success({
+        "current": {
+            "file_hash": node.file_hash,
+            "file_size": node.file_size,
+            "upload_time": node.upload_time.isoformat() if node.upload_time else None,
+        },
+        "items": version_service.list_versions(node),
+    })
+
+
+@bp.get("/file/version/download")
+@login_required
+def version_download():
+    version_id = request.args.get("version_id", type=int)
+    if not version_id:
+        raise ApiError("缺少版本 id", code=3513)
+    from ..services import version_service
+
+    version, node = version_service.get_version_for_access(
+        current_user(), version_id, required="read"
+    )
+    path = file_service.storage_service.open_physical(version.save_path)
+    if not path.is_file():
+        raise ApiError("历史版本物理文件已丢失", code=3514, http_status=410)
+
+    stamp = version.create_time.strftime("%Y%m%d-%H%M%S") if version.create_time else "old"
+    if "." in node.file_name:
+        idx = node.file_name.rfind(".")
+        download_name = f"{node.file_name[:idx]}_{stamp}{node.file_name[idx:]}"
+    else:
+        download_name = f"{node.file_name}_{stamp}"
+
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=download_name,
+        conditional=True,
+    )
+
+
+@bp.post("/file/version/restore")
+@login_required
+def version_restore():
+    data = request.get_json(silent=True) or {}
+    from ..services import version_service
+
+    node = version_service.restore_version(
+        current_user(), int(data.get("version_id") or 0)
+    )
+    return success(node.to_dict(), msg="版本已恢复")
