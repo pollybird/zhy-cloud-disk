@@ -146,7 +146,7 @@ npm run build  # 生产构建，输出到 dist/
 - **无限级部门树**：超管可新增 / 重命名 / 迁移 / 删除部门，设置部门显示排序与独立存储配额（`0` 表示不限额）。
 - **成员与授权**：部门成员默认只读；可显式授予 `read_only` / `read_write` / `denied` 权限，支持文件夹级授权与到期时间；可委派部门管理员（仅本部门 / 本部门及子部门）。
 - **部门文件**：上传走 MD5 秒传预检与配额原子扣减；改名、移动、文件夹递归、下载、审计日志一应俱全。
-- **功能开关**：安装向导或系统设置中开启；Docker 静默安装时用环境变量 `ZHY_DEPARTMENT_DRIVE=true` 开启，默认关闭。
+- **功能开关**：安装向导中开启（Docker 静默安装用环境变量 `ZHY_DEPARTMENT_DRIVE`，镜像内置 `.env` 默认开启、代码级默认关闭）；该开关仅在安装期写入，安装后如需变更需修改数据库 `system_setting` 表的 `department_drive_enabled` 并重启服务。
 - **关闭时的接口行为**：部门相关接口（`/api/department/*`、`/api/permission/*`、`/api/log/*`）蓝图仍注册，但由应用级守卫统一拒绝，返回 HTTP 403、业务码 `4030`「部门网盘功能未开启」；个人网盘接口与 `/api/system/feature-flags` 不受影响（后者需登录）。
 - **删除保护**：部门（含任意子孙部门）下仍存在正常文件或文件夹时，删除请求返回 HTTP 409、业务码 `3310`，请先迁移或清空文件后再删除；删除空部门会一并清理其成员、管理员与授权关联，审计日志不受影响。
 - **1.0.0 升级**：旧库首次启动自动补建部门相关表与 `file_node.file_hash`、`file_node.department_id`、`user.primary_department_id` 列（幂等）；未配置开关时默认关闭，个人功能与历史数据不受影响。
@@ -281,7 +281,7 @@ client/
 | `ZHY_DEFAULT_QUOTA` | 5368709120 | 默认用户配额（字节，5GiB） |
 | `ZHY_CORS_ORIGINS` | * | CORS 允许源 |
 | `ZHY_ALLOW_REGISTER` | false | 是否开放注册 |
-| `ZHY_DEPARTMENT_DRIVE` | false | 静默安装时是否开启部门共享网盘（`true`/`false`，仅首次安装生效，之后在系统设置中切换） |
+| `ZHY_DEPARTMENT_DRIVE` | false | 静默安装时是否开启部门共享网盘（`true`/`false`，仅首次安装生效；镜像内置 `.env` 默认 `true`，安装后变更需改库 `system_setting.department_drive_enabled` 并重启） |
 
 ## 开发测试
 
@@ -297,6 +297,8 @@ cd client && npm test
 ```
 
 ## 架构概览
+
+> 📖 **完整文档（Wiki）**：[docs/wiki/Home.md](docs/wiki/Home.md) —— 安装部署、个人盘/部门盘/客户端使用、管理后台、备份恢复、API 参考、配置参考、架构与开发、FAQ 共 11 篇。
 
 ```
 zhyCloudDisk/
