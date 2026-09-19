@@ -10,5 +10,6 @@ psycopg2-binary==2.9.10
 redis==5.2.0
 psutil==6.1.0
 paramiko==3.5.0
+cryptography==50.0.1
 gunicorn==23.0.0
 pytest==8.3.3
