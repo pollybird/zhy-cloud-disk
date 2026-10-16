@@ -24,6 +24,8 @@ class User(db.Model):
     create_time = db.Column(db.DateTime, nullable=False, default=utcnow)
     status = db.Column(db.String(16), nullable=False, default="active")  # active/disabled
     last_active_time = db.Column(db.DateTime, nullable=True, index=True)  # 1.3.0 在线统计
+    # M3：令牌版本。改密/管理员重置密码/禁用启用时 +1，使旧 access/refresh 立即失效
+    token_version = db.Column(db.Integer, nullable=False, default=1)
 
     def to_dict(self) -> dict:
         return {

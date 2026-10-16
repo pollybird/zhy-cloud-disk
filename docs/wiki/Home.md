@@ -1,13 +1,13 @@
 # 钟毓私有云盘（zhyCloudDisk）Wiki
 
-本 Wiki 是 zhyCloudDisk 的完整文档集，覆盖安装部署、三端（Web / 桌面客户端 / API）使用说明、配置参考、备份恢复与开发者指南。内容基于 **v1.3.1** 源码核实编写，与 README、CHANGELOG 保持一致并做更详细的展开。
+本 Wiki 是 zhyCloudDisk 的完整文档集，覆盖安装部署、三端（Web / 桌面客户端 / API）使用说明、配置参考、备份恢复与开发者指南。内容基于 **v1.3.2** 源码核实编写，与 README、CHANGELOG 保持一致并做更详细的展开。
 
 基于 **Flask + Vue3 + Electron** 的轻量私有云盘系统：服务端支持个人文件管理、分享、插件扩展与多级部门共享网盘，并提供跨平台桌面同步客户端，本地文件夹与云端实时双向同步。
 
-> 当前版本 **v1.3.1** · Apache License 2.0 · 泰州姜堰钟毓信息技术有限公司
+> 当前版本 **v1.3.2** · Apache License 2.0 · 泰州姜堰钟毓信息技术有限公司
 
 - 仓库：[Gitee](https://gitee.com/pollybird/zhy-cloud-disk)（主）｜ [GitHub](https://github.com/pollybird/zhy-cloud-disk) ｜ [GitCode](https://gitcode.com/pollybird/ZhyCloudDisk)
-- 镜像：[Docker Hub `pollybird/zhy-cloud-disk`](https://hub.docker.com/r/pollybird/zhy-cloud-disk)（`latest` / `1.3.1` / `1.3.0` / `1.2.0`）
+- 镜像：[Docker Hub `pollybird/zhy-cloud-disk`](https://hub.docker.com/r/pollybird/zhy-cloud-disk)（`latest` / `1.3.2` / `1.3.1` / `1.3.0` / `1.2.0`）
 
 ## 本页内容
 
@@ -111,6 +111,7 @@ cd frontend && npm install && npm run build   # dist/ 交给 nginx 托管，/api
 | v1.2.0 | 秒传 + 断点续传 | 跨用户秒传、分片上传、Range 下载、排他编辑锁、all-in-one 单容器镜像 |
 | v1.3.0 | 数据安全与可观测 | 回收站、历史版本、监控仪表盘、备份恢复（本地/SFTP/FTP） |
 | v1.3.1 | 客户端修复 | 编辑锁残留修复、客户端回收站与历史版本、显式声明 cryptography |
+| v1.3.2 | 安全审计专项 | 默认凭据/越权写入等 2 高危 + 6 中危 + 5 低危修复；登录限频锁定、会话版本失效、上传预检、CORS 白名单、反代与安全头 |
 
 完整变更见仓库 [CHANGELOG.md](https://gitee.com/pollybird/zhy-cloud-disk/blob/master/CHANGELOG.md)。
 
@@ -129,7 +130,7 @@ cd frontend && npm install && npm run build   # dist/ 交给 nginx 托管，/api
 
 - 各页开头有「本页内容」锚点目录，章节间使用相对链接互跳；
 - 命令默认在项目根目录执行；Docker 部署默认以 `deploy.sh` / `docker compose` 为准；
-- 所有接口与错误码均以 v1.3.1 后端代码实际实现为准。
+- 所有接口与错误码均以 v1.3.2 后端代码实际实现为准。
 
 ## 高频入口
 

@@ -35,7 +35,8 @@ def create_app(config_overrides: dict | None = None) -> Flask:
 
     register_error_handlers(app)
 
-    # JWT 吊销列表：每次受保护请求检查 jti 是否已被吊销
+    # JWT 吊销列表：每次受保护请求检查 jti 是否已被吊销。
+    # M3：access 与 refresh 使用独立吊销前缀（refresh 轮换时旧 refresh 入独立列表）。
     @jwt.token_in_blocklist_loader
     def _check_jti_revoked(jwt_header, jwt_data):
         from .services.cache_service import cache_exists
@@ -43,10 +44,17 @@ def create_app(config_overrides: dict | None = None) -> Flask:
         jti = jwt_data.get("jti")
         if not jti:
             return False
-        return cache_exists(f"jwt:revoked:{jti}")
+        prefix = (
+            "jwt:refresh-revoked"
+            if jwt_data.get("type") == "refresh"
+            else "jwt:revoked"
+        )
+        return cache_exists(f"{prefix}:{jti}")
 
     # 安装态全局拦截（必须在业务蓝图之前评估）
     _register_install_guard(app)
+    # M5：插件扩展路由网关（启用态 + 登录态）
+    _register_plugin_gate(app)
 
     # 健康检查
     @app.get("/api/ping")
@@ -64,12 +72,14 @@ def create_app(config_overrides: dict | None = None) -> Flask:
             from .utils.migrations import (
                 ensure_department_columns,
                 ensure_file_hash_column,
+                ensure_user_token_version,
                 ensure_v130_columns,
             )
 
             ensure_file_hash_column()
             ensure_department_columns()
             ensure_v130_columns()
+            ensure_user_token_version()
         _start_scheduler(app)
         _init_plugins(app)
 
@@ -111,6 +121,41 @@ def _register_install_guard(app: Flask) -> None:
         if request.path == "/api/ping" or request.path.startswith("/api/setup/"):
             return None
         raise ApiError("系统尚未安装，请先完成安装向导", code=4001, http_status=503)
+
+
+def _register_plugin_gate(app: Flask) -> None:
+    """M5：插件扩展路由 /api/plugin/ext/<name>/... 统一网关。
+
+    - 插件未启用/不存在 → 403（蓝图无法注销，禁用在网关层拦截）
+    - REQUIRE_AUTH（默认 True）→ 必须携带有效 JWT，否则 401
+    """
+    import re
+
+    from flask import request
+    from flask_jwt_extended import verify_jwt_in_request
+
+    from .plugins.manager import manager
+    from .utils.errors import ApiError
+
+    _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+
+    @app.before_request
+    def _plugin_gate():
+        prefix = "/api/plugin/ext/"
+        if not request.path.startswith(prefix):
+            return None
+        name = request.path[len(prefix):].split("/", 1)[0]
+        if not _NAME_RE.match(name):
+            raise ApiError("插件未启用或不存在", code=5102, http_status=403)
+        instance = manager.get(name)
+        if instance is None:
+            raise ApiError("插件未启用或不存在", code=5102, http_status=403)
+        if getattr(instance, "REQUIRE_AUTH", True):
+            try:
+                verify_jwt_in_request()
+            except Exception:
+                raise ApiError("请先登录", code=4010, http_status=401)
+        return None
 
 
 def _register_metrics_hooks(app: Flask) -> None:

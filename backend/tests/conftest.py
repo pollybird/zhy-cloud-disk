@@ -41,6 +41,17 @@ def app():
     return _app
 
 
+@pytest.fixture(autouse=True)
+def _reset_login_ratelimit():
+    """M1：每个用例前清空登录/注册限频与失败锁定计数，避免用例间相互误伤。"""
+    from app.services.cache_service import cache_flush_pattern
+
+    cache_flush_pattern("rl:*")
+    cache_flush_pattern("fail:login:*")
+    cache_flush_pattern("lock:login:*")
+    yield
+
+
 @pytest.fixture()
 def client(app):
     """测试客户端；每函数自动回滚数据库变更。"""

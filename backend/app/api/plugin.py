@@ -125,14 +125,33 @@ def file_stream():
 @bp.post("/file/save")
 @login_required
 def file_save():
-    """编辑保存回调：重新走类型与配额校验，临时文件原子覆盖。"""
+    """编辑保存回调（H2 整改）。
+
+    - 必须具备写权限（部门文件经 permission + 排他锁双重校验）；
+    - 容量增量按"所在范围"扣减（部门文件扣部门配额，部门 0=不限）；
+    - 共享内容块（ref_count>1）绝不原地覆盖：新内容注册为独立 blob，
+      旧引用释放（归零时物理删除），避免污染其他引用者；
+    - 1.0/1.1 旧版非 blob（legacy）文件提交成功后再删除原物理文件。
+    """
+    import hashlib
+
+    from sqlalchemy import and_, update
+
+    from ..models.department import Department
+    from ..models.file_blob import FileBlob
+    from ..services import blob_service, file_lock_service
+
     payload = request.get_json(silent=True) or {}
     file_id = int(payload.get("id") or 0)
     if not file_id:
         raise ApiError("缺少文件 id", code=5201, http_status=400)
-    node = file_service.get_owned_node(current_user(), file_id)
+
+    user = current_user()
+    # H2-1：required="write"（内部已做写权限与排他锁校验），再显式确认一次锁
+    node = file_service.get_owned_node(user, file_id, required="write")
     if node.is_folder:
         raise ApiError("文件夹不支持保存", code=CODE_SAVE_INVALID)
+    file_lock_service.ensure_unlocked(user, node)
 
     _plugin_hook(node, "save")
 
@@ -155,58 +174,148 @@ def file_save():
     if suffix in current_app.config["DENIED_EXTENSIONS"]:
         raise ApiError(f"禁止保存 .{suffix} 类型的文件", code=3105)
 
-    # 配额校验：原子扣减增量（超额时 UPDATE 影响 0 行）
-    delta = len(content) - (node.file_size or 0)
-    if delta > 0:
-        from sqlalchemy import and_, update
+    new_size = len(content)
+    new_hash = hashlib.md5(content).hexdigest()
+    old_size = int(node.file_size or 0)
+    delta = new_size - old_size
 
-        user = current_user()
-        updated = db.session.execute(
-            update(User)
-            .where(
-                and_(
-                    User.id == user.id,
-                    User.used_storage + delta <= User.total_storage,
-                )
-            )
-            .values(used_storage=User.used_storage + delta)
-        )
-        if updated.rowcount == 0:
-            raise ApiError("存储空间不足，保存被拒绝", code=3106, http_status=413)
+    # 内容未变化：无需任何配额/物理操作
+    if new_hash == node.file_hash and new_size == old_size:
+        return success(node.to_dict(), msg="内容无变化")
 
-    # 物理文件安全校验
-    path = file_service.storage_service.open_physical(node.save_path)
-    if not path.is_file():
-        if delta > 0:
-            _refund_quota(current_user().id, delta)
+    # 新内容先落暂存（与 blob 同卷，后续 os.replace 为原子同盘移动）
+    staged_path = None
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(file_service.storage_service.staging_dir()), suffix=".save"
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        staged_path = tmp_name
+    except OSError:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise ApiError("保存失败：无法写入暂存文件", code=CODE_SAVE_INVALID)
+
+    # 物理文件丢失检查前置：此时尚未扣减配额，直接拒绝
+    old_save_path = node.save_path
+    if not old_save_path or not file_service.storage_service.open_physical(
+        old_save_path
+    ).is_file():
+        file_service.storage_service.remove_staging(staged_path)
         raise ApiError("物理文件已丢失", code=3204, http_status=410)
 
-    # 临时文件 + 原子替换，避免写一半损坏原文件
-    try:
-        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(content)
-            os.replace(tmp_name, path)
-        except Exception:
-            if os.path.exists(tmp_name):
-                os.unlink(tmp_name)
-            raise
-    except OSError as e:
-        if delta > 0:
-            _refund_quota(current_user().id, delta)
-        raise ApiError(f"保存失败：{e}", code=CODE_SAVE_INVALID)
+    # 旧引用形态：blob（去重文件）/ legacy（1.0/1.1 旧文件）/ missing（漂移）
+    old_blob = None
+    legacy_old_path = None
+    if file_service.storage_service.is_blob_path(old_save_path) and node.file_hash:
+        old_blob = (
+            db.session.query(FileBlob)
+            .filter(FileBlob.file_hash == node.file_hash)
+            .first()
+        )
+    elif not file_service.storage_service.is_blob_path(old_save_path):
+        legacy_old_path = old_save_path
 
-    node.file_size = len(content)
-    db.session.commit()
-    db.session.refresh(current_user())
+    removed_blob_path: str | None = None
+    try:
+        # H2-2：配额增量按所在范围扣减（与上传同一口径）
+        if delta > 0:
+            if not file_service._charge_quota(user.id, node.department_id, delta):
+                raise ApiError("存储空间不足，保存被拒绝", code=3106, http_status=413)
+        elif delta < 0:
+            _decrease_quota(user.id, node.department_id, -delta)
+
+        # H2-3：新内容注册为独立 blob（可能与他人内容相同而被去重复用）
+        new_blob = blob_service.get_or_create(new_hash, new_size, staged_path)
+        staged_path = None  # get_or_create 已移入 blob 目录或已丢弃暂存
+        blob_service.retain(new_blob)
+
+        # 释放本节点对旧内容的一次引用
+        if old_blob is not None:
+            removed_blob_path = blob_service.release(old_blob)
+
+        node.save_path = new_blob.save_path
+        node.file_hash = new_hash
+        node.file_size = new_size
+        db.session.commit()
+    except ApiError:
+        db.session.rollback()
+        if staged_path:
+            file_service.storage_service.remove_staging(staged_path)
+        raise
+    except Exception:
+        db.session.rollback()
+        if staged_path:
+            file_service.storage_service.remove_staging(staged_path)
+        raise ApiError("保存失败，请重试", code=CODE_SAVE_INVALID)
+
+    # 提交成功后再清理旧物理文件（失败不影响数据一致性）
+    if removed_blob_path and os.path.exists(removed_blob_path):
+        try:
+            os.unlink(removed_blob_path)
+        except OSError:
+            pass
+    if legacy_old_path:
+        try:
+            p = file_service.storage_service.open_physical(legacy_old_path)
+            if p.is_file():
+                p.unlink()
+        except (OSError, ApiError):
+            pass
+
+    db.session.refresh(user)
     return success(node.to_dict(), msg="保存成功")
 
 
-def _refund_quota(user_id: int, delta: int) -> None:
-    locked = db.session.query(User).filter(User.id == user_id).with_for_update().first()
+def _decrease_quota(user_id: int, department_id: int | None, size: int) -> None:
+    """原子回退逻辑配额（不低于 0）；部门无限额同样统计用量。"""
+    from sqlalchemy import and_, update
+
+    from ..models.department import Department
+
+    if size <= 0:
+        return
+    if department_id:
+        model, col, filt = (
+            Department,
+            Department.used_storage,
+            Department.id == department_id,
+        )
+    else:
+        model, col, filt = User, User.used_storage, User.id == user_id
+    result = db.session.execute(
+        update(model)
+        .where(and_(filt, col - size >= 0))
+        .values(used_storage=col - size)
+    )
+    if result.rowcount == 0:
+        # 用量数据异常（理论不应出现）：钳制到 0
+        db.session.execute(update(model).where(filt).values(used_storage=0))
+
+
+def _refund_quota_scope(user_id: int, department_id: int | None, delta: int) -> None:
+    """H2-4：按所在范围回退配额（行锁读改写，供失败补偿场景使用）。"""
+    if delta <= 0:
+        return
+    from ..models.department import Department
+
+    if department_id:
+        locked = (
+            db.session.query(Department)
+            .filter(Department.id == department_id)
+            .with_for_update()
+            .first()
+        )
+    else:
+        locked = (
+            db.session.query(User)
+            .filter(User.id == user_id)
+            .with_for_update()
+            .first()
+        )
     if locked is not None:
-        locked.used_storage = max(locked.used_storage - delta, 0)
+        locked.used_storage = max(int(locked.used_storage) - delta, 0)
         db.session.commit()
 
 

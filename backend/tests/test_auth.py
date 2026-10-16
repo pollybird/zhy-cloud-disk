@@ -88,16 +88,24 @@ def test_change_password(client, admin_headers):
         "old_password": "Admin12345", "new_password": "NewPass12345",
     })
     assert r.status_code == 200
+    # M3：改密后旧令牌立即失效
+    r = client.get("/api/user/info", headers=admin_headers)
+    assert r.status_code == 401
+    assert r.get_json()["code"] == 4015
     # 新密码可登录
     r = client.post("/api/login", json={"username": "admin", "password": "NewPass12345"})
     assert r.status_code == 200
+    new_headers = {
+        "Authorization": f"Bearer {r.get_json()['data']['access_token']}"
+    }
     # 旧密码失败
     r = client.post("/api/login", json={"username": "admin", "password": "Admin12345"})
     assert r.status_code == 401
-    # 恢复
-    client.put("/api/user/pwd", headers=admin_headers, json={
+    # 恢复（必须用新密码登录得到的新令牌）
+    r = client.put("/api/user/pwd", headers=new_headers, json={
         "old_password": "NewPass12345", "new_password": "Admin12345",
     })
+    assert r.status_code == 200
 
 
 def test_change_password_wrong_old(client, admin_headers):

@@ -203,7 +203,7 @@ npm run package:mac     # macOS zip（x64 + arm64；macOS 本机构建可改 dmg
 1. **功能合入与自测**：三端测试全绿（后端 pytest / 前端 vitest / 客户端 vitest），必要时做真实 Docker E2E（如备份恢复全流程）。
 2. **版本号**：遵循[语义化版本](https://semver.org/lang/zh-CN/)；更新 `backend/app/config.py` 的 `ZHY_VERSION`。
 3. **CHANGELOG.md**：按「主题 → 新功能 / 修复与加固 / 升级说明 / 质量保障」结构记录。
-4. **Docker 镜像**：构建并推送 Docker Hub `pollybird/zhy-cloud-disk` 的 `latest` 与版本号标签（如 `1.3.1`）。
+4. **Docker 镜像**：构建并推送 Docker Hub `pollybird/zhy-cloud-disk` 的 `latest` 与版本号标签（如 `1.3.2`）。
 5. **仓库发布**：同步 Gitee（主）、GitHub、GitCode 三个仓库并打 tag。
 
 ## 相关页面

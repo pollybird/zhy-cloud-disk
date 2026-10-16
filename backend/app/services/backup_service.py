@@ -862,10 +862,15 @@ def delete_backup(record_id: int) -> None:
 # ===========================================================================
 
 def _safe_extract(zip_path: Path, target_dir: Path) -> None:
+    # L8：基于 resolved 路径的相对包含关系校验，杜绝 startswith 前缀误判
+    # （如 /tmp/ab 会被误判为 /tmp/a 的子路径）导致的 zip-slip 逃逸。
+    target_root = target_dir.resolve()
     with zipfile.ZipFile(zip_path) as zf:
         for member in zf.namelist():
             dest = (target_dir / member).resolve()
-            if not str(dest).startswith(str(target_dir.resolve())):
+            try:
+                dest.relative_to(target_root)
+            except ValueError:
                 raise BackupError(f"备份包含非法路径：{member}")
         zf.extractall(target_dir)
 

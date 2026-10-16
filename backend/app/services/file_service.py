@@ -32,6 +32,10 @@ CHUNK_SIZE_MIN = 1024 * 1024
 CHUNK_SIZE_MAX = 25 * 1024 * 1024
 SESSION_TTL = timedelta(hours=24)
 
+# M6：上传前资源保护
+MAX_STAGING_BYTES = 8 * 1024 ** 3          # 暂存目录（分片会话+整文件暂存）水位上限
+MAX_ACTIVE_SESSIONS_PER_USER = 50          # 每用户进行中的分片会话上限
+
 
 # ---------------------------------------------------------------------------
 # 归属与权限
@@ -362,6 +366,8 @@ def upload_file(
             raise ApiError("不能覆盖文件夹", code=3108)
         return _do_overwrite(user, file_storage, existing, file_hash, department_id)
 
+    # M6：暂存水位保护（整文件流式，落盘前仅知整体水位）
+    _ensure_staging_capacity(0)
     staged_path, file_size, server_hash = storage_service.save_staged_stream(file_storage)
     if file_hash and file_hash != server_hash:
         storage_service.remove_staging(staged_path)
@@ -401,6 +407,56 @@ def _charge_quota(user_id: int, department_id: int | None, size: int) -> bool:
             .values(used_storage=User.used_storage + size)
         )
     return updated.rowcount > 0
+
+
+def _quota_has_capacity(
+    user_id: int, department_id: int | None, size: int
+) -> bool:
+    """只读容量预检，口径与 _charge_quota 一致（部门 0=不限）。"""
+    if size <= 0:
+        return True
+    if department_id:
+        row = (
+            db.session.query(
+                Department.used_storage, Department.storage_quota
+            )
+            .filter(Department.id == department_id)
+            .first()
+        )
+        if row is None:
+            return False
+        return row.storage_quota <= 0 or row.used_storage + size <= row.storage_quota
+    row = (
+        db.session.query(User.used_storage, User.total_storage)
+        .filter(User.id == user_id)
+        .first()
+    )
+    return bool(row and row.used_storage + size <= row.total_storage)
+
+
+def _staging_watermark() -> int:
+    """暂存区当前占用字节：分片会话目录 + 整文件暂存目录。"""
+    total = 0
+    for root in (storage_service.uploads_tmp_root(), storage_service.staging_dir()):
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            try:
+                if p.is_file():
+                    total += p.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def _ensure_staging_capacity(incoming: int) -> None:
+    """暂存水位保护：当前水位 + 本次预计落盘超过上限即拒绝（429）。"""
+    if _staging_watermark() + max(int(incoming), 0) > MAX_STAGING_BYTES:
+        raise ApiError(
+            "服务器暂存空间繁忙，请稍后重试或改小文件",
+            code=3213,
+            http_status=429,
+        )
 
 
 def _register_blob_and_node(
@@ -488,6 +544,8 @@ def _do_overwrite(
     department_id: int | None = None,
 ) -> FileNode:
     """覆盖原文件：UPDATE 原行，保留 id/file_name/parent_id。"""
+    # M6：暂存水位保护（整文件流式，落盘前仅知整体水位）
+    _ensure_staging_capacity(0)
     staged_path, file_size, server_hash = storage_service.save_staged_stream(file_storage)
     suffix = storage_service.extract_suffix(
         storage_service.safe_original_name(file_storage.filename)
@@ -675,7 +733,11 @@ def chunk_init(
 
     _ensure_upload_target(user, parent_id, department_id)
 
-    # 已存在相同物理块：直接走秒传，无需分片
+    # M6-1：容量预检（秒传同样占用一次逻辑配额，故置于秒传判断之前）
+    if not _quota_has_capacity(user.id, department_id, file_size):
+        raise ApiError("存储空间不足，上传被拒绝", code=3106, http_status=413)
+
+    # 已存在相同物理块：直接走秒传，无需分片（不新建会话、不落暂存）
     if blob_service.find_usable(h, file_size) is not None:
         return {"instant": True}
 
@@ -707,6 +769,27 @@ def chunk_init(
     )
     if existing is not None:
         return {"instant": False, **existing.to_dict()}
+
+    # M6-2：并发进行中会话数限制（复用会话不计入，断点恢复不受影响）
+    active_count = (
+        db.session.query(func.count(UploadSession.id))
+        .filter(
+            UploadSession.user_id == user.id,
+            UploadSession.status == "uploading",
+            UploadSession.expire_time > now,
+        )
+        .scalar()
+    )
+    if (active_count or 0) >= MAX_ACTIVE_SESSIONS_PER_USER:
+        raise ApiError(
+            f"进行中的上传任务过多（上限 {MAX_ACTIVE_SESSIONS_PER_USER} 个），"
+            "请完成或取消部分任务后再试",
+            code=3212,
+            http_status=429,
+        )
+
+    # M6-3：暂存水位预检（本次分片落盘预计占用 file_size 字节）
+    _ensure_staging_capacity(file_size)
 
     session = UploadSession(
         id=uuid.uuid4().hex,

@@ -67,3 +67,17 @@ def ensure_v130_columns() -> None:
         )
 
     db.session.commit()
+
+
+def ensure_user_token_version() -> None:
+    """M3 迁移：user 表增加 token_version（幂等，存量用户默认 1）。"""
+    inspector = inspect(db.engine)
+    user_cols = {c["name"] for c in inspector.get_columns("user")}
+    if "token_version" not in user_cols:
+        db.session.execute(
+            text(
+                "ALTER TABLE user ADD COLUMN token_version "
+                "INTEGER NOT NULL DEFAULT 1"
+            )
+        )
+        db.session.commit()

@@ -4,7 +4,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
-ZHY_VERSION = "1.3.1"
+ZHY_VERSION = "1.3.2"
 
 # 后端根目录（backend/）
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -89,6 +89,26 @@ def build_config() -> dict:
         or "dev-insecure-jwt-secret-please-run-setup"
     )
 
+    # M4：已安装但密钥仍为代码内公开回退值 → 安装配置缺失/损坏，拒绝启动
+    if (
+        secret_key == "dev-insecure-secret-please-run-setup"
+        or jwt_secret_key == "dev-insecure-jwt-secret-please-run-setup"
+    ) and _resolve_installed_config_path().is_file():
+        raise RuntimeError(
+            "检测到系统已安装但密钥仍为默认回退值：instance/config.installed.json "
+            "缺失或内容异常，请恢复该文件（权限 0600）或重新安装，禁止以公开密钥运行"
+        )
+    # 生产环境安装向导前以显式短密钥启动时，仅放行但打强警告
+    if (
+        len(secret_key) < 16 or len(jwt_secret_key) < 24
+    ) and not _resolve_installed_config_path().is_file():
+        if os.environ.get("ZHY_ENV", "production") == "production":
+            import logging
+
+            logging.getLogger("zhy.config").warning(
+                "生产环境使用短密钥启动：请尽快完成安装向导以生成强随机密钥"
+            )
+
     default_quota = installed.get("default_quota", 5 * 1024 ** 3)
     try:
         default_quota = int(os.environ.get("ZHY_DEFAULT_QUOTA", default_quota))
@@ -101,8 +121,13 @@ def build_config() -> dict:
     except (TypeError, ValueError):
         max_upload = 2 * 1024 ** 3
 
-    cors_raw = os.environ.get("ZHY_CORS_ORIGINS", "*")
-    cors_origins = [o.strip() for o in cors_raw.split(",") if o.strip()] or "*"
+    # M2：CORS 白名单——开发环境默认 *，生产默认空列表（不发跨域头即全拒）；
+    # 生产跨域部署必须显式配置 ZHY_CORS_ORIGINS=https://your-host。
+    # 一体化镜像前后端同源（nginx 提供静态资源 + /api 反代），无需跨域。
+    env = os.environ.get("ZHY_ENV", "production")
+    cors_default = "*" if env == "development" else ""
+    cors_raw = os.environ.get("ZHY_CORS_ORIGINS", cors_default)
+    cors_origins = [o.strip() for o in cors_raw.split(",") if o.strip()]
 
     redis_url = (
         os.environ.get("ZHY_REDIS_URL")
@@ -113,7 +138,7 @@ def build_config() -> dict:
     return {
         "APP_VERSION": ZHY_VERSION,
         "ZHY_VERSION": ZHY_VERSION,
-        "ENV": os.environ.get("ZHY_ENV", "production"),
+        "ENV": env,
         "SECRET_KEY": secret_key,
         # SQLAlchemy
         "SQLALCHEMY_DATABASE_URI": database_uri,

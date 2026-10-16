@@ -37,6 +37,9 @@ class BasePlugin:
     supported_exts: tuple[str, ...] = ()
     # 前端预览渲染类型，见 PREVIEW_TYPES
     preview_type: str = "none"
+    # M5：扩展路由（/api/plugin/ext/<name>/...）是否要求登录。
+    # 默认 True（安全默认）；确需匿名访问的插件可显式覆写为 False。
+    REQUIRE_AUTH: bool = True
 
     def __init__(self) -> None:
         self.validate_meta()

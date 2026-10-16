@@ -91,6 +91,14 @@ RUN printf 'server {\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
 \n\
+    # L5 安全响应头（静态 location 内含 add_header 会中断继承，已在该处补全）\n\
+    add_header X-Content-Type-Options "nosniff" always;\n\
+    add_header X-Frame-Options "SAMEORIGIN" always;\n\
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;\n\
+    add_header Content-Security-Policy "default-src '"'"'self'"'"'; script-src '"'"'self'"'"' '"'"'unsafe-inline'"'"'; style-src '"'"'self'"'"' '"'"'unsafe-inline'"'"'; img-src '"'"'self'"'"' data: blob:; media-src '"'"'self'"'"' data: blob:; font-src '"'"'self'"'"' data:; connect-src '"'"'self'"'"'; object-src '"'"'none'"'"'; frame-ancestors '"'"'self'"'"'; base-uri '"'"'self'"'"'" always;\n\
+    # 全站启用 HTTPS 后再开启 HSTS：\n\
+    # add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;\n\
+\n\
     location / {\n\
         try_files $uri $uri/ /index.html;\n\
     }\n\
@@ -99,8 +107,11 @@ RUN printf 'server {\n\
         proxy_pass         http://127.0.0.1:5000;\n\
         proxy_set_header   Host              $host;\n\
         proxy_set_header   X-Real-IP         $remote_addr;\n\
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;\n\
-        proxy_set_header   X-Forwarded-Proto $scheme;\n\
+        # L3：覆盖（而非追加）X-Forwarded-For，只携带直连客户端地址；\n\
+        # 后端 ProxyFix 仅信任 1 跳，杜绝外部伪造 XFF 链。\n\
+        proxy_set_header   X-Forwarded-For    $remote_addr;\n\
+        proxy_set_header   X-Forwarded-Proto  $scheme;\n\
+        proxy_set_header   X-Forwarded-Port   $server_port;\n\
         client_max_body_size 2g;\n\
         proxy_read_timeout   300s;\n\
         proxy_send_timeout   300s;\n\
@@ -109,6 +120,10 @@ RUN printf 'server {\n\
     location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {\n\
         expires 30d;\n\
         add_header Cache-Control "public, immutable";\n\
+        add_header X-Content-Type-Options "nosniff" always;\n\
+        add_header X-Frame-Options "SAMEORIGIN" always;\n\
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;\n\
+        add_header Content-Security-Policy "default-src '"'"'self'"'"'; script-src '"'"'self'"'"' '"'"'unsafe-inline'"'"'; style-src '"'"'self'"'"' '"'"'unsafe-inline'"'"'; img-src '"'"'self'"'"' data: blob:; media-src '"'"'self'"'"' data: blob:; font-src '"'"'self'"'"' data:; connect-src '"'"'self'"'"'; object-src '"'"'none'"'"'; frame-ancestors '"'"'self'"'"'; base-uri '"'"'self'"'"'" always;\n\
     }\n\
 }\n' > /etc/nginx/conf.d/default.conf && \
     rm -f /etc/nginx/sites-enabled/default

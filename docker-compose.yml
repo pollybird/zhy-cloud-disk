@@ -10,7 +10,8 @@ services:
       ZHY_STORAGE_DIR: /app/storage
       # ---- 超级管理员（首次启动静默安装生效） ----
       ZHY_ADMIN_USERNAME: ${ZHY_ADMIN_USERNAME:-admin}
-      ZHY_ADMIN_PASSWORD: ${ZHY_ADMIN_PASSWORD:-Admin12345}
+      # H1：未显式设置密码即启动失败，杜绝“忘记改密码”导致的默认凭据
+      ZHY_ADMIN_PASSWORD: ${ZHY_ADMIN_PASSWORD:?必须在 .env 中设置 ZHY_ADMIN_PASSWORD 强随机密码（勿用示例值，可用 openssl rand -base64 18 生成，或执行 ./deploy.sh init 自动生成）}
       ZHY_ADMIN_EMAIL: ${ZHY_ADMIN_EMAIL:-admin@zhy.local}
       # ---- 部门共享网盘（首次安装生效；默认开启） ----
       ZHY_DEPARTMENT_DRIVE: ${ZHY_DEPARTMENT_DRIVE:-true}
@@ -19,8 +20,9 @@ services:
       ZHY_JWT_REFRESH_DAYS: ${ZHY_JWT_REFRESH_DAYS:-30}
       # ---- 默认配额（字节；默认 5GiB） ----
       ZHY_DEFAULT_QUOTA: ${ZHY_DEFAULT_QUOTA:-5368709120}
-      # ---- CORS ----
-      ZHY_CORS_ORIGINS: ${ZHY_CORS_ORIGINS:-*}
+      # ---- CORS（M2：生产默认留空=禁止跨域；镜像前后端同源无需配置。
+      #      独立域名前端部署时设置，如 https://disk.example.com） ----
+      ZHY_CORS_ORIGINS: ${ZHY_CORS_ORIGINS:-}
     volumes:
       - app-instance:/app/instance
       - app-storage:/app/storage

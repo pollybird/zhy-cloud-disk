@@ -24,6 +24,8 @@ def change_password(user: User, old_password: str, new_password: str) -> None:
     if verify_password(new_password, user.password):
         raise ApiError("新密码不能与原密码相同", code=1202)
     user.password = hash_password(new_password)
+    # M3：改密后所有旧令牌立即失效
+    user.token_version = (user.token_version or 1) + 1
     db.session.commit()
 
 
@@ -78,7 +80,10 @@ def set_user_status(admin: User, user_id: int, status: str) -> User:
         raise ApiError("不能修改自己的启用状态", code=1210)
     if status == "disabled" and user.role == "admin" and _count_active_admins() <= 1:
         raise ApiError("至少需要保留一个启用状态的管理员", code=1211)
-    user.status = status
+    if user.status != status:
+        user.status = status
+        # M3：禁用/启用均吊销既有会话（启用后禁用前的旧令牌也不得复用）
+        user.token_version = (user.token_version or 1) + 1
     db.session.commit()
     return user
 
@@ -153,6 +158,8 @@ def admin_update_user(admin: User, user_id: int, payload: dict) -> User:
         raise ApiError("用户不存在", code=1204, http_status=404)
 
     is_self = user.id == admin.id
+    # M3：本次修改是否需要吊销该用户既有会话（状态切换/管理员重置密码）
+    revoke_sessions = False
 
     if "email" in payload:
         email = validate_email(payload.get("email", ""))
@@ -179,7 +186,9 @@ def admin_update_user(admin: User, user_id: int, payload: dict) -> User:
         if status == "disabled" and user.role == "admin":
             if _count_active_admins() <= 1:
                 raise ApiError("至少需要保留一个启用状态的管理员", code=1211)
-        user.status = status
+        if user.status != status:
+            user.status = status
+            revoke_sessions = True
 
     if "total_storage" in payload:
         total_storage = _parse_quota(payload.get("total_storage"), user.total_storage)
@@ -192,6 +201,11 @@ def admin_update_user(admin: User, user_id: int, payload: dict) -> User:
         if is_self:
             raise ApiError("请通过个人中心修改自己的密码", code=1213)
         user.password = hash_password(validate_password(new_password))
+        revoke_sessions = True
+
+    if revoke_sessions:
+        # M3：吊销该用户全部既有令牌
+        user.token_version = (user.token_version or 1) + 1
 
     db.session.commit()
     return user

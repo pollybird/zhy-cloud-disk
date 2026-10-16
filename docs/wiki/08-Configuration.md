@@ -33,7 +33,7 @@
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ZHY_ADMIN_USERNAME` | — | 超管用户名（与 `ZHY_ADMIN_PASSWORD` 同时设置时触发静默安装） |
-| `ZHY_ADMIN_PASSWORD` | — | 超管密码 |
+| `ZHY_ADMIN_PASSWORD` | —（**必填**） | 超管密码。v1.3.2 起强制强度：8–64 位且含字母与数字，拒绝弱口令集合与 `admin` 前缀（`2011`）；Docker Compose 未设置该变量时直接拒绝启动 |
 | `ZHY_ADMIN_EMAIL` | — | 超管邮箱 |
 | `ZHY_DATABASE_URL` | SQLite（`instance/preinstall.db`） | SQLAlchemy 连接串；Docker 模式自动使用内置 MySQL（`mysql+pymysql://root@127.0.0.1:3306/zhycloud`） |
 | `ZHY_REDIS_URL` | 空（内存缓存） | Redis 连接串；Docker 模式自动使用 `redis://127.0.0.1:6379/0` |
@@ -50,7 +50,7 @@
 | `ZHY_JWT_REFRESH_DAYS` | `30` | Refresh Token 有效期（天） |
 | `ZHY_DEFAULT_QUOTA` | `5368709120`（5GiB） | 默认用户配额（字节）；仅影响新建用户/安装时超管 |
 | `ZHY_MAX_UPLOAD_SIZE` | `2147483648`（2GiB） | 单文件上传上限（字节），同时作为 Flask `MAX_CONTENT_LENGTH` |
-| `ZHY_CORS_ORIGINS` | `*` | CORS 允许源；多个用英文逗号分隔（如 `https://a.com,https://b.com`） |
+| `ZHY_CORS_ORIGINS` | 生产（`ZHY_ENV=production`，默认）：**空（拒绝所有跨域）**；开发：`*` | CORS 允许源；多个用英文逗号分隔（如 `https://a.com,https://b.com`）。v1.3.2 起移除了生产环境 `*` 兜底；一体化容器前后端同源无需配置，仅前后端分源部署时需要显式设置 |
 
 > `.env.example`（Docker 部署模板）包含：`ZHY_WEB_PORT`、`ZHY_ADMIN_USERNAME`、`ZHY_ADMIN_PASSWORD`、`ZHY_ADMIN_EMAIL`（默认 `admin@zhy.local`）、`ZHY_DEPARTMENT_DRIVE`、`ZHY_JWT_ACCESS_HOURS`、`ZHY_JWT_REFRESH_DAYS`、`ZHY_DEFAULT_QUOTA`、`ZHY_CORS_ORIGINS`。
 

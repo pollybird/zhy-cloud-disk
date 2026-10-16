@@ -44,6 +44,25 @@ ensure_docker() {
     fi
 }
 
+# H1：生成强随机管理员密码（20 位字母数字，重试至同时含字母和数字）
+generate_admin_password() {
+    local pw=""
+    local i
+    for i in 1 2 3 4 5; do
+        if command -v openssl >/dev/null 2>&1; then
+            pw=$(openssl rand -base64 18 2>/dev/null | tr -d '/+=' | cut -c1-20)
+        else
+            pw=$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)
+        fi
+        if printf '%s' "$pw" | grep -q '[A-Za-z]' && printf '%s' "$pw" | grep -q '[0-9]'; then
+            printf '%s' "$pw"
+            return 0
+        fi
+    done
+    # 兜底：十六进制 24 位（0-9a-f），长度与字符类别满足后端强度规则
+    head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
 ensure_env() {
     if [ ! -f "$ENV_FILE" ]; then
         if [ ! -f "$ENV_EXAMPLE" ]; then
@@ -51,7 +70,17 @@ ensure_env() {
             exit 1
         fi
         cp "$ENV_EXAMPLE" "$ENV_FILE"
-        info "已从 $ENV_EXAMPLE 生成 $ENV_FILE，请按需修改（尤其是管理员密码）后重新执行：./deploy.sh up"
+        # H1：首次生成 .env 时自动写入强随机管理员密码（仅本次回显）
+        local gen_pw
+        gen_pw=$(generate_admin_password)
+        if [ -n "$gen_pw" ]; then
+            sed -i "s|^ZHY_ADMIN_PASSWORD=.*|ZHY_ADMIN_PASSWORD=${gen_pw}|" "$ENV_FILE"
+            info "已在 $ENV_FILE 中生成随机管理员密码（仅本次显示，请立即保存并妥善保管）："
+            printf '\033[1;32m        %s\033[0m\n' "$gen_pw"
+        else
+            warn "随机密码生成失败，请手动编辑 $ENV_FILE 设置强随机 ZHY_ADMIN_PASSWORD。"
+        fi
+        info "已从 $ENV_EXAMPLE 生成 $ENV_FILE，请按需修改后执行：./deploy.sh up"
         exit 0
     fi
 }
@@ -99,11 +128,15 @@ wait_healthy() {
 security_hints() {
     local pw
     pw=$(env_val ZHY_ADMIN_PASSWORD "")
-    if [ "$pw" = "Admin12345" ]; then
-        warn "管理员密码仍为示例值 Admin12345，公网部署前请务必修改 .env（仅首次安装生效）。"
+    if [ -z "$pw" ]; then
+        warn "未设置 ZHY_ADMIN_PASSWORD：缺少该变量容器将拒绝启动（compose 必填项）。"
+    elif [ "$pw" = "请替换为强随机密码" ] \
+        || printf '%s' "$pw" | grep -qiE '^(Admin12345|admin123|admin123456|password123?|123456789?|qwerty123|ChangeMe123|changeme)$' \
+        || printf '%s' "$pw" | grep -qi '^admin'; then
+        warn "管理员密码为占位符/示例值/弱口令，后端将拒绝静默安装；请修改 .env（仅首次安装生效）。"
     fi
     local cors
-    cors=$(env_val ZHY_CORS_ORIGINS "*")
+    cors=$(env_val ZHY_CORS_ORIGINS "")
     if [ "$cors" = "*" ]; then
         warn "CORS 当前允许所有来源（*）；公网部署建议在 .env 中限定 ZHY_CORS_ORIGINS。"
     fi

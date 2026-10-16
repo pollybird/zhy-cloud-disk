@@ -418,6 +418,27 @@ def _do_install(app, payload: dict) -> dict:
 # Docker / 环境变量静默安装
 # ---------------------------------------------------------------------------
 
+# H1：静默安装明确拒绝的示例值/常见弱口令（此外还须通过 validate_password 强度规则）
+_WEAK_PASSWORDS = {
+    "Admin12345", "admin123", "admin123456", "password", "password123",
+    "12345678", "123456789", "qwerty123", "ChangeMe123", "changeme",
+}
+
+
+def _reject_weak_admin_password(password: str | None) -> None:
+    """静默安装的管理员密码必须为强随机值，拒绝示例值/弱口令/以 admin 开头。"""
+    if not password:
+        raise ApiError("未设置 ZHY_ADMIN_PASSWORD，拒绝静默安装", code=2011)
+    if password in _WEAK_PASSWORDS or password.lower().startswith("admin"):
+        raise ApiError(
+            "管理员密码为示例值或弱口令，禁止静默安装；请设置强随机密码"
+            "（如 openssl rand -base64 18）",
+            code=2011,
+            http_status=400,
+        )
+    validate_password(password)
+
+
 def maybe_auto_install(app) -> bool:
     """环境变量齐全且系统未安装时，执行静默初始化。返回是否执行了安装。"""
     if is_installed():
@@ -429,6 +450,7 @@ def maybe_auto_install(app) -> bool:
         password = os.environ.get("ZHY_ADMIN_PASSWORD")
         if not username or not password:
             return False
+        _reject_weak_admin_password(password)  # H1：弱口令/示例值拒绝静默安装
         payload = {
             "db_type": "mysql",
             "database_uri": (
@@ -456,6 +478,7 @@ def maybe_auto_install(app) -> bool:
     password = os.environ.get("ZHY_ADMIN_PASSWORD")
     if not username or not password:
         return False
+    _reject_weak_admin_password(password)  # H1：弱口令/示例值拒绝静默安装
 
     if os.environ.get("ZHY_DATABASE_URL"):
         uri = os.environ["ZHY_DATABASE_URL"]
