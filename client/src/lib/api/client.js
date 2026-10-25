@@ -82,6 +82,14 @@ http.interceptors.response.use(
       }
       if (onAuthExpired) onAuthExpired()
     }
+    // 业务错误（如 409 锁冲突 code=3501）需保留 code/msg/data，供调用方按业务码判断
+    const body = error.response && error.response.data
+    if (body && typeof body === 'object' && 'code' in body) {
+      const bizErr = new Error(body.msg || error.message)
+      bizErr.code = body.code
+      bizErr.data = body.data
+      throw bizErr
+    }
     throw error
   }
 )

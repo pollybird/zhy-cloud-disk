@@ -7,20 +7,41 @@ files:
   - resources/**/*
 win:
   target:
-    - target: portable
-      arch: [x64]
+    - target: nsis
+      arch: [x64, arm64]
   icon: resources/icon.png
   signtoolOptions: null
   signAndEditExecutable: false
-portable:
-  artifactName: ${productName}-${version}-portable.exe
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 钟毓云盘
+  artifactName: ZhyCloudDisk-Client-${version}-win-${arch}-setup.${ext}
 mac:
   target:
     - target: zip
       arch: [x64, arm64]
   icon: resources/icon.png
   category: public.app-category.productivity
+  artifactName: ZhyCloudDisk-Client-${version}-mac-${arch}.${ext}
 linux:
-  target: AppImage
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+    - target: rpm
+      arch: [x64, arm64]
   icon: resources/icon.png
   category: Network
+  executableName: zhy-cloud-disk
+appImage:
+  artifactName: ZhyCloudDisk-Client-${version}-linux-${arch}.${ext}
+deb:
+  artifactName: ZhyCloudDisk-Client-${version}-linux-${arch}.${ext}
+rpm:
+  artifactName: ZhyCloudDisk-Client-${version}-linux-${arch}.${ext}

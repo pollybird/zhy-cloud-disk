@@ -83,7 +83,7 @@ docker run -d \
 
 > `ZHY_ADMIN_PASSWORD` 必填：弱口令（如 `admin123`、`Admin12345`、`password123` 等）会在静默安装时被拒绝（业务码 `2011`）。生产环境建议同时设置 `ZHY_ENV=production` 并在 `ZHY_CORS_ORIGINS` 中填写实际访问来源（逗号分隔多个）。
 
-首次启动自动完成安装（MySQL root 授权、建库建表、初始化超管账号），访问 `http://<服务器IP>:8080` 即可使用。可用标签：`latest`、`1.3.2`、`1.3.1`、`1.3.0`、`1.2.0`。
+首次启动自动完成安装（MySQL root 授权、建库建表、初始化超管账号），访问 `http://<服务器IP>:8080` 即可使用。可用标签：`latest`、`1.3.3`、`1.3.2`、`1.3.1`、`1.3.0`、`1.2.0`。
 
 ## 方式三：分步 Docker Compose 部署
 
@@ -168,7 +168,7 @@ npm run build   # 生产构建，输出 dist/
 
 ```bash
 curl http://<服务器IP>:8080/api/ping
-# {"code":0,"msg":"ok","data":{"version":"1.3.2","installed":true}}
+# {"code":0,"msg":"ok","data":{"version":"1.3.3","installed":true}}
 ```
 
 `deploy.sh up` 正是轮询该接口判断启动成功的。系统未安装时，除 `/api/ping` 与 `/api/setup/*` 外的业务接口统一返回 HTTP 503、业务码 `4001`。

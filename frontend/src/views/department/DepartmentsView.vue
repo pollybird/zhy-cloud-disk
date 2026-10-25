@@ -132,6 +132,7 @@
           <el-tree-select
             v-model="moveTarget"
             :data="moveOptions"
+            :props="{ label: 'name', children: 'children' }"
             check-strictly
             :render-after-expand="false"
             default-expand-all

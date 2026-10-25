@@ -1,6 +1,6 @@
 <template>
   <div class="access-wrapper">
-    <div class="brand">钟毓私有云盘 · 文件分享</div>
+    <div class="brand">钟毓云盘系统 · 文件分享</div>
 
     <el-card class="access-card" v-loading="loading">
       <!-- 失效提示 -->

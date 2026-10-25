@@ -3,7 +3,7 @@
     <el-card class="setup-card" shadow="always">
       <template #header>
         <div class="setup-header">
-          <h2>钟毓私有云盘 · 安装向导</h2>
+          <h2>钟毓云盘系统 · 安装向导</h2>
           <p class="sub">首次运行，请完成环境检测与超级管理员初始化</p>
         </div>
       </template>
@@ -21,7 +21,7 @@
       <div v-show="active === 0" class="step-pane welcome-pane">
         <div class="welcome-content">
           <el-icon class="welcome-logo"><Cloudy /></el-icon>
-          <h1 class="welcome-title">钟毓私有云盘</h1>
+          <h1 class="welcome-title">钟毓云盘系统</h1>
           <p class="welcome-version">版本 {{ ZHY_VERSION }}</p>
           <el-divider class="welcome-divider" />
           <p class="welcome-copyright">
@@ -99,7 +99,7 @@
       </div>
 
       <!-- 步骤二：数据库配置 -->
-      <div v-show="active === 2" class="step-pane">
+      <div v-show="active === 2 && !isDocker" class="step-pane">
         <el-form :model="dbForm" label-width="110px">
           <el-form-item label="数据库类型">
             <el-radio-group v-model="dbForm.db_type" @change="onDbTypeChange">
@@ -189,7 +189,7 @@
       </div>
 
       <!-- 步骤三：功能选项 -->
-      <div v-show="active === 3" class="step-pane">
+      <div v-show="active === 3 && !isDocker" class="step-pane">
         <el-form label-width="110px">
           <el-form-item label="功能模块">
             <el-checkbox v-model="enableDepartment" class="feature-checkbox">

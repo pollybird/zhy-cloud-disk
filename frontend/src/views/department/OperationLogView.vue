@@ -11,6 +11,7 @@
             <el-tree-select
               v-model="deptId"
               :data="deptOptions"
+              :props="{ label: 'name', children: 'children' }"
               check-strictly
               :render-after-expand="false"
               default-expand-all

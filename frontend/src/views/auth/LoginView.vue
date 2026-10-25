@@ -3,7 +3,7 @@
     <el-card class="auth-card" shadow="always">
       <div class="brand">
         <el-icon :size="30" color="#2563eb"><Cloudy /></el-icon>
-        <h2>钟毓私有云盘</h2>
+        <h2>钟毓云盘系统</h2>
       </div>
 
       <el-form

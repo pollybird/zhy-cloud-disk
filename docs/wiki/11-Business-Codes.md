@@ -1,6 +1,6 @@
 # 业务码一览
 
-本页是 zhyCloudDisk 后端**全部在用业务码**的完整清单，比 [API 参考 · 业务错误码总表](./07-API-Reference.md#业务错误码总表) 更全、更细：每码标注 HTTP 状态、含义、典型触发场景与面向前端/客户端开发者的处理建议。全部取值穷举自 v1.3.2 后端源码（`backend/app/utils/errors.py`、`backend/app/utils/response.py`、全部 `api/*.py`、`services/*.py`、`plugins/`、`utils/` 中 240+ 处抛错点），未收录任何代码中不存在的码。
+本页是 zhyCloudDisk 后端**全部在用业务码**的完整清单，比 [API 参考 · 业务错误码总表](./07-API-Reference.md#业务错误码总表) 更全、更细：每码标注 HTTP 状态、含义、典型触发场景与面向前端/客户端开发者的处理建议。全部取值穷举自 v1.3.3 后端源码（`backend/app/utils/errors.py`、`backend/app/utils/response.py`、全部 `api/*.py`、`services/*.py`、`plugins/`、`utils/` 中 240+ 处抛错点），未收录任何代码中不存在的码。
 
 ## 本页内容
 
